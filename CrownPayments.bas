@@ -30,7 +30,7 @@ Option Explicit
 Private Const UAIG_STALE_DAYS As Long = 60
 
 ' Which copy of this file is in the workbook. Run CrownVersion to see it.
-Public Const CROWN_PAYMENTS_VERSION As String = "6 Oct - recovers from a stuck page, and will not write what it cannot verify"
+Public Const CROWN_PAYMENTS_VERSION As String = "6 Oct b - writes down what the Verve page actually says"
 
 ' The boxes and labels on Verve's own pages, named once so a change on
 ' their side is one line here rather than a hunt through the code.
@@ -63,6 +63,13 @@ Private Const CANCELLED_LONG_ENOUGH As Long = 60
 ' policy numbers; eight means the site is not answering at all.
 Private Const CONSECUTIVE_BEFORE_RELOAD As Long = 3
 Private Const CONSECUTIVE_BEFORE_GIVING_UP As Long = 8
+
+' How many times to look for the Future table before believing it is not
+' there, and how many pages to write down in full when it is not. Ten
+' pages is plenty to see a pattern and few enough that the sheet stays
+' readable and the run stays quick.
+Private Const FUTURE_LOOKS As Long = 3
+Private Const PAGES_TO_WRITE_DOWN As Long = 10
 
 Private Const COL_POLICY As Long = 1     ' A  Policy Number
 Private Const COL_SITE As Long = 2       ' B  Website (the carrier)
@@ -1499,10 +1506,11 @@ Private Function CrownVerveOpenFuture(ByVal drv As ChromeDriver) As String
     On Error Resume Next
     answer = drv.ExecuteScript( _
         "function pick(list){for(var i=0;i<list.length;i++){" & _
-        "var t=((list[i].innerText||'')+'').replace(/^\s+|\s+$/g,'').toLowerCase();" & _
-        "if(t==='future')return list[i];}return null;}" & _
+        "var t=((list[i].innerText||'')+'').replace(/\u00a0/g,' ')" & _
+        ".replace(/^\s+|\s+$/g,'').toLowerCase();" & _
+        "if(t.indexOf('future')===0&&t.length<24)return list[i];}return null;}" & _
         "var el=pick(document.getElementsByTagName('a'));" & _
-        "if(!el)el=pick(document.querySelectorAll('span,td,li,div'));" & _
+        "if(!el)el=pick(document.querySelectorAll('span,td,li,div,button'));" & _
         "if(!el)return 'no Future tab';el.click();return 'opened';")
     On Error GoTo 0
 
@@ -1707,6 +1715,57 @@ Private Function CrownVerveRecover(ByVal drv As ChromeDriver, ByVal By As Seleni
 End Function
 
 
+' Everything on the page that could possibly be the Future tab, and the
+' headings of every table on it.
+'
+' Not a guess at a selector - the page's own words, brought back so they
+' can be read by somebody who can see them. Three goes at guessing from a
+' screenshot have each looked right and each been wrong; this is cheaper
+' than a fourth.
+Private Function CrownVerveLook(ByVal drv As ChromeDriver) As String
+    Dim answer As String
+
+    On Error Resume Next
+    answer = drv.ExecuteScript( _
+        "function clean(s){return ((s||'')+'')" & _
+        ".replace(/\s+/g,' ').replace(/^ | $/g,'');}" & _
+        "var out=[],seen={};" & _
+        "var all=document.querySelectorAll('a,span,td,li,div,button');" & _
+        "for(var i=0;i<all.length;i++){var t=clean(all[i].innerText);" & _
+        "if(!t||t.length>26)continue;if(all[i].getElementsByTagName('*').length>2)continue;" & _
+        "if(seen[t])continue;seen[t]=1;out.push(t);if(out.length>45)break;}" & _
+        "var tabs=document.getElementsByTagName('table'),heads=[];" & _
+        "for(var j=0;j<tabs.length;j++){var r=tabs[j].rows[0];if(!r)continue;" & _
+        "if(!tabs[j].getClientRects().length)continue;var cells=[];" & _
+        "for(var c=0;c<r.cells.length;c++){cells.push(clean(r.cells[c].innerText));}" & _
+        "var line=cells.join(' / ');if(line.replace(/[ \/]/g,'')==='')continue;" & _
+        "heads.push(tabs[j].rows.length+' rows: '+line.substring(0,150));" & _
+        "if(heads.length>12)break;}" & _
+        "return 'WORDS ON THE PAGE: '+out.join(' | ')+String.fromCharCode(10)+" & _
+        "'TABLES ON SCREEN: '+(heads.length?heads.join(String.fromCharCode(10)):'(none)');")
+    On Error GoTo 0
+
+    CrownVerveLook = answer
+End Function
+
+' The sheet those notes go on, made only if something needs writing down.
+Private Function CrownLookSheet(ByRef ws As Worksheet, ByRef row As Long) As Boolean
+    If Not ws Is Nothing Then
+        CrownLookSheet = True
+        Exit Function
+    End If
+
+    Set ws = CrownSheet("VerveLook")
+    ws.Cells.ClearContents
+    ws.Range("A1:C1").value = Array("Record number", "Policy number", "What the page says")
+    ws.Columns(3).ColumnWidth = 120
+    ws.Columns(3).WrapText = False
+    row = 2
+
+    CrownLookSheet = True
+End Function
+
+
 Public Sub CrownVervePaymentDue()
     Dim drv As ChromeDriver, clsDrv As Chrm
     Dim By As New Selenium.By
@@ -1722,6 +1781,9 @@ Public Sub CrownVervePaymentDue()
     Dim reported As String, reportNote As String, cancelledOn As String
     Dim futureNote As String, futureDate As String, futureAmount As String
     Dim missed As Long, stopped As Boolean, badNumber As Long
+    Dim futureRows As String
+    Dim look As Long, looked As Long
+    Dim wsLook As Worksheet, lookRow As Long
     Dim row As Long, done As Long, blank As Long, skipped As Long
     Dim i As Long
 
@@ -1917,14 +1979,41 @@ Public Sub CrownVervePaymentDue()
                     ' records ended up on one policy's figures.
                     If Not CrownPageShows(drv, policyNo, 5) Then
                         futureNote = "the Future tab was showing another policy - not read"
-                    ElseIf CrownVerveNextDue(CrownVerveFutureRows(drv), futureDate, _
-                                             futureAmount, futureNote) Then
-                        dueAmount = futureAmount
-                        dueDate = futureDate
+                    Else
+                        ' Asked more than once. The panel is fetched in the
+                        ' background, so the first look can be at a page
+                        ' that has not finished arriving - which reads
+                        ' exactly like a page with nothing on it.
+                        futureRows = ""
+
+                        For look = 1 To FUTURE_LOOKS
+                            futureRows = CrownVerveFutureRows(drv)
+                            If Len(futureRows) > 0 Then Exit For
+                            drv.Wait 900
+                            DoEvents
+                        Next look
+
+                        If CrownVerveNextDue(futureRows, futureDate, futureAmount, futureNote) Then
+                            dueAmount = futureAmount
+                            dueDate = futureDate
+                        End If
                     End If
                 End If
 
                 note = Trim$(note & " " & futureNote)
+
+                ' Nothing readable. Write down what IS on the page, for the
+                ' first few only - enough to see the shape of it without
+                ' turning the run into a transcript.
+                If Len(futureAmount) = 0 And looked < PAGES_TO_WRITE_DOWN Then
+                    If CrownLookSheet(wsLook, lookRow) Then
+                        wsLook.Cells(lookRow, 1).value = recordId
+                        wsLook.Cells(lookRow, 2).value = policyNo
+                        wsLook.Cells(lookRow, 3).value = futureNote & vbCrLf & CrownVerveLook(drv)
+                        lookRow = lookRow + 1
+                        looked = looked + 1
+                    End If
+                End If
             End If
 
             ' What the report says beats what the billing line implies.
@@ -2005,6 +2094,9 @@ NextVerve:
                CONSECUTIVE_BEFORE_GIVING_UP & " policies in a row. Nothing was written from " & _
                "that point on. Run it again when the site is behaving." & vbCrLf, "") & vbCrLf & _
            reportNote & vbCrLf & vbCrLf & _
+           IIf(looked > 0, "The Future tab could not be read on " & looked & " policies. " & _
+               "What those pages actually say is written on the VerveLook sheet - " & _
+               "please send me that sheet." & vbCrLf & vbCrLf, "") & _
            "See the VervePayments sheet for the detail.", vbInformation, "Crown Superior"
 End Sub
 
@@ -2088,7 +2180,7 @@ Private Function CrownCsvLookup(ByVal path As String, ByVal keyHeading As String
     Dim fileNumber As Integer
     Dim line As String, key As String, digits As String, value As String
     Dim keyAt As Long, valueAt As Long
-    Dim first As Boolean
+    Dim first As Boolean, byContent As Boolean
 
     Set map = CreateObject("Scripting.Dictionary")
     Set CrownCsvLookup = map
@@ -2118,7 +2210,15 @@ Private Function CrownCsvLookup(ByVal path As String, ByVal keyHeading As String
                 valueAt = CrownColumnOf(parts, valueHeading)
                 first = False
 
-                If keyAt < 0 Or valueAt < 0 Then Exit Do
+                ' This report comes out of a report builder that names its
+                ' columns textbox6, textbox25, textbox32 - so there is
+                ' nothing to match a heading against. The columns are then
+                ' found by what is IN them instead, further down.
+                If keyAt < 0 Or valueAt < 0 Then
+                    byContent = True
+
+                    Exit Do
+                End If
             ElseIf UBound(parts) >= keyAt And UBound(parts) >= valueAt Then
                 key = UCase$(Trim$(parts(keyAt)))
                 value = Trim$(parts(valueAt))
@@ -2138,6 +2238,165 @@ Private Function CrownCsvLookup(ByVal path As String, ByVal keyHeading As String
 
 Finished:
     Close #fileNumber
+
+    If byContent Then
+        Set map = CrownCsvByContent(path, heading, found)
+        Set CrownCsvLookup = map
+    End If
+End Function
+
+' The same report, when its headings are no use.
+'
+' The policy column is the one whose values look like policy numbers -
+' that is safe, because a policy number has a shape and nothing else in
+' the report shares it.
+'
+' The status column is only accepted if every different value in it is a
+' word this agency actually uses for a status. A column of unrecognised
+' words is NOT taken as the status: writing a guess into the status field
+' of a thousand policies is a far worse outcome than leaving them as they
+' are, and the sheet says so rather than going quiet.
+Private Function CrownCsvByContent(ByVal path As String, ByRef heading As String, _
+                                   ByRef found As Long) As Object
+    Dim map As Object
+    Dim rows As Collection, parts As Variant
+    Dim fileNumber As Integer
+    Dim line As String, key As String, digits As String, value As String
+    Dim i As Long, c As Long, widest As Long
+    Dim policyAt As Long, statusAt As Long
+    Dim hits() As Long, good() As Long, seen() As Long
+
+    Set map = CreateObject("Scripting.Dictionary")
+    Set CrownCsvByContent = map
+    Set rows = New Collection
+    found = 0
+
+    If Len(path) = 0 Then Exit Function
+
+    On Error GoTo Done
+
+    fileNumber = FreeFile
+    Open path For Input As #fileNumber
+
+    Do Until EOF(fileNumber)
+        Line Input #fileNumber, line
+
+        If Len(Trim$(line)) > 0 Then
+            parts = CrownSplitCsvLine(line)
+            rows.Add parts
+
+            If UBound(parts) > widest Then widest = UBound(parts)
+        End If
+    Loop
+
+    Close #fileNumber
+
+    If rows.Count < 2 Then Exit Function
+
+    ReDim hits(0 To widest)
+    ReDim good(0 To widest)
+    ReDim seen(0 To widest)
+
+    ' Row 1 is the heading row, whatever it says. Counted from row 2.
+    For i = 2 To rows.Count
+        parts = rows(i)
+
+        For c = 0 To widest
+            If UBound(parts) >= c Then
+                value = Trim$(CStr(parts(c)))
+
+                If Len(value) > 0 Then
+                    seen(c) = seen(c) + 1
+
+                    If CrownCouldBePolicyColumn(value) Then hits(c) = hits(c) + 1
+                    If CrownIsStatusWord(value) Then good(c) = good(c) + 1
+                End If
+            End If
+        Next c
+    Next i
+
+    policyAt = -1
+    statusAt = -1
+
+    For c = 0 To widest
+        If seen(c) > 0 Then
+            If hits(c) * 2 > seen(c) Then
+                If policyAt < 0 Or hits(c) > hits(policyAt) Then policyAt = c
+            End If
+
+            ' Every value recognised, not merely most of them. A column
+            ' that is right nine times in ten is a column that writes the
+            ' wrong status onto one policy in ten.
+            If good(c) = seen(c) Then
+                If statusAt < 0 Or seen(c) > seen(statusAt) Then statusAt = c
+            End If
+        End If
+    Next c
+
+    If policyAt < 0 Or statusAt < 0 Then
+        heading = heading & "  [columns found by content: policy " & policyAt & ", status " & statusAt & "]"
+
+        Exit Function
+    End If
+
+    For i = 2 To rows.Count
+        parts = rows(i)
+
+        If UBound(parts) >= policyAt And UBound(parts) >= statusAt Then
+            key = UCase$(Trim$(CStr(parts(policyAt))))
+            value = Trim$(CStr(parts(statusAt)))
+
+            If Len(key) > 0 And Len(value) > 0 Then
+                If Not map.Exists(key) Then
+                    map.Add key, value
+                    found = found + 1
+                End If
+
+                digits = CrownDigits(key)
+                If Len(digits) > 0 And Not map.Exists(digits) Then map.Add digits, value
+            End If
+        End If
+    Next i
+
+Done:
+End Function
+
+' The same shape test, but stricter, for working out which column is
+' which.
+'
+' A date passes the ordinary test - 10/28/2026 is ten characters with
+' eight digits in it - so a report that puts the date before the policy
+' number would have its dates read as policy numbers. No carrier number
+' in this book has a slash in it and every date does.
+Private Function CrownCouldBePolicyColumn(ByVal text As String) As Boolean
+    If InStr(text, "/") > 0 Then Exit Function
+
+    CrownCouldBePolicyColumn = CrownLooksLikePolicy(text)
+End Function
+
+' Is this one of the words this agency uses for a policy's status?
+'
+' A fixed list on purpose. Anything outside it means the column is not the
+' status column, and the statuses are left alone.
+Private Function CrownIsStatusWord(ByVal text As String) As Boolean
+    Dim word As String
+    Dim known As Variant
+    Dim i As Long
+
+    word = LCase$(Trim$(text))
+
+    known = Array("active", "cancelled", "canceled", "cancel", "cancel notice", _
+                  "cx notice", "pending", "pending cancellation", "expired", "lapsed", _
+                  "reinstated", "non-renewed", "nonrenewed", "non renewal", "in force", _
+                  "inforce", "new", "renewed", "rewritten")
+
+    For i = LBound(known) To UBound(known)
+        If word = known(i) Then
+            CrownIsStatusWord = True
+
+            Exit Function
+        End If
+    Next i
 End Function
 
 Private Function CrownVerveStatuses(ByVal drv As ChromeDriver, ByVal By As Selenium.By, _
@@ -2220,8 +2479,9 @@ Private Function CrownVerveStatuses(ByVal drv As ChromeDriver, ByVal By As Selen
     Set CrownVerveStatuses = map
 
     If found = 0 Then
-        note = "the report came down but had no Policy and Status columns to read." & vbCrLf & _
-               "Its heading row was: " & Left$(heading, 180)
+        note = "the report came down but no column in it could be read as a policy number" & vbCrLf & _
+               "with a status beside it. Nothing was written to any policy's status." & vbCrLf & _
+               "Its heading row was: " & Left$(heading, 240)
     Else
         note = found & " statuses read from the Amount Due report."
     End If
