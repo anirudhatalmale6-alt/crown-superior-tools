@@ -30,7 +30,7 @@ Option Explicit
 Private Const UAIG_STALE_DAYS As Long = 60
 
 ' Which copy of this file is in the workbook. Run CrownVersion to see it.
-Public Const CROWN_PAYMENTS_VERSION As String = "6 Oct b - writes down what the Verve page actually says"
+Public Const CROWN_PAYMENTS_VERSION As String = "6 Oct c - presses OK on Verve's Session Expiring box"
 
 ' The boxes and labels on Verve's own pages, named once so a change on
 ' their side is one line here rather than a hunt through the code.
@@ -1729,11 +1729,14 @@ Private Function CrownVerveLook(ByVal drv As ChromeDriver) As String
     answer = drv.ExecuteScript( _
         "function clean(s){return ((s||'')+'')" & _
         ".replace(/\s+/g,' ').replace(/^ | $/g,'');}" & _
-        "var out=[],seen={};" & _
+        "var out=[],rest=[],seen={};" & _
         "var all=document.querySelectorAll('a,span,td,li,div,button');" & _
         "for(var i=0;i<all.length;i++){var t=clean(all[i].innerText);" & _
         "if(!t||t.length>26)continue;if(all[i].getElementsByTagName('*').length>2)continue;" & _
-        "if(seen[t])continue;seen[t]=1;out.push(t);if(out.length>45)break;}" & _
+        "if(seen[t])continue;seen[t]=1;" & _
+        "if(/future|statement|billing|installment|session/i.test(t))out.push(t);" & _
+        "else if(rest.length<40)rest.push(t);}" & _
+        "out=out.concat(rest);" & _
         "var tabs=document.getElementsByTagName('table'),heads=[];" & _
         "for(var j=0;j<tabs.length;j++){var r=tabs[j].rows[0];if(!r)continue;" & _
         "if(!tabs[j].getClientRects().length)continue;var cells=[];" & _
@@ -1766,6 +1769,52 @@ Private Function CrownLookSheet(ByRef ws As Worksheet, ByRef row As Long) As Boo
 End Function
 
 
+' Press OK on Verve's "Session Expiring" box.
+'
+' It was on all ten pages the VerveLook sheet recorded. It is a modal, so
+' until it is dismissed every click lands on it rather than on the tab
+' underneath - which is why the Future tab was never reached.
+'
+' Scoped to the box itself. There is an OK on other things on that site
+' and pressing the wrong one would confirm something nobody asked to
+' confirm, so the button has to be inside an element whose own text
+' mentions an expiring session.
+'
+' "The smallest element whose text matches" is not enough, and the first
+' version of this was wrong for exactly that reason: the smallest match
+' is usually the LABEL - a div holding the words "Session Expiring" and
+' nothing else. The element wanted is the smallest one that both says it
+' AND has something pressable in it.
+Private Function CrownVerveKeepAlive(ByVal drv As ChromeDriver) As String
+    Dim answer As String
+
+    On Error Resume Next
+    answer = drv.ExecuteScript( _
+        "function clean(s){return ((s||'')+'').replace(/\s+/g,' ')" & _
+        ".replace(/^ | $/g,'');}" & _
+        "function okIn(el){var hits=el.querySelectorAll('input,button,a,span,td');" & _
+        "for(var j=0;j<hits.length;j++){var w=clean(hits[j].innerText||hits[j].value);" & _
+        "if(!w)continue;w=w.toLowerCase();" & _
+        "if(w==='ok'||w==='continue'||w==='yes'||w==='keep working')return hits[j];}" & _
+        "return null;}" & _
+        "var best=null,small=0,btn=null,sawWords=false;" & _
+        "var all=document.querySelectorAll('div,table,form,section');" & _
+        "for(var i=0;i<all.length;i++){var el=all[i],t=clean(el.innerText);" & _
+        "if(!/session\s*expir/i.test(t))continue;" & _
+        "if(t.length>400)continue;" & _
+        "if(!el.getClientRects().length)continue;" & _
+        "sawWords=true;" & _
+        "var b=okIn(el);if(!b)continue;" & _
+        "if(best===null||t.length<small){best=el;small=t.length;btn=b;}}" & _
+        "if(btn){btn.click();" & _
+        "return 'pressed '+clean(btn.innerText||btn.value).toLowerCase();}" & _
+        "return sawWords?'session box with no OK on it':'no session box';")
+    On Error GoTo 0
+
+    CrownVerveKeepAlive = answer
+End Function
+
+
 Public Sub CrownVervePaymentDue()
     Dim drv As ChromeDriver, clsDrv As Chrm
     Dim By As New Selenium.By
@@ -1782,6 +1831,8 @@ Public Sub CrownVervePaymentDue()
     Dim futureNote As String, futureDate As String, futureAmount As String
     Dim missed As Long, stopped As Boolean, badNumber As Long
     Dim futureRows As String
+    Dim sessionNote As String
+    Dim dismissed As Long
     Dim look As Long, looked As Long
     Dim wsLook As Worksheet, lookRow As Long
     Dim row As Long, done As Long, blank As Long, skipped As Long
@@ -1890,6 +1941,16 @@ Public Sub CrownVervePaymentDue()
 
         On Error Resume Next
 
+        ' Before anything is typed. The box is modal, so a lookup typed
+        ' underneath it goes nowhere and every policy after that reads the
+        ' page we were already on.
+        sessionNote = CrownVerveKeepAlive(drv)
+
+        If Left$(sessionNote, 7) = "pressed" Then
+            drv.Wait 600
+            dismissed = dismissed + 1
+        End If
+
         EnterData drv, Keys, VERVE_LOOKUP_BOX, policyNo, "ID", "", True
         ClickElement drv, VERVE_LOOKUP_GO, "ID"
 
@@ -1960,6 +2021,13 @@ Public Sub CrownVervePaymentDue()
             ' Only consulted when today is clear. A policy in arrears owes
             ' that money now and today's figure has to win.
             If Val("0" & dueAmount) <= 0 Then
+                ' And again here. The billing tab is a fresh request, and
+                ' the box can come back between one and the next.
+                If Left$(CrownVerveKeepAlive(drv), 7) = "pressed" Then
+                    drv.Wait 600
+                    dismissed = dismissed + 1
+                End If
+
                 futureNote = CrownVerveOpenFuture(drv)
 
                 If futureNote = "opened" Then
@@ -2009,7 +2077,9 @@ Public Sub CrownVervePaymentDue()
                     If CrownLookSheet(wsLook, lookRow) Then
                         wsLook.Cells(lookRow, 1).value = recordId
                         wsLook.Cells(lookRow, 2).value = policyNo
-                        wsLook.Cells(lookRow, 3).value = futureNote & vbCrLf & CrownVerveLook(drv)
+                        wsLook.Cells(lookRow, 3).value = futureNote _
+                            & vbCrLf & "session box: " & sessionNote _
+                            & vbCrLf & CrownVerveLook(drv)
                         lookRow = lookRow + 1
                         looked = looked + 1
                     End If
@@ -2094,6 +2164,8 @@ NextVerve:
                CONSECUTIVE_BEFORE_GIVING_UP & " policies in a row. Nothing was written from " & _
                "that point on. Run it again when the site is behaving." & vbCrLf, "") & vbCrLf & _
            reportNote & vbCrLf & vbCrLf & _
+           IIf(dismissed > 0, "Verve's Session Expiring box was dismissed " & dismissed & _
+               " times." & vbCrLf, "") & _
            IIf(looked > 0, "The Future tab could not be read on " & looked & " policies. " & _
                "What those pages actually say is written on the VerveLook sheet - " & _
                "please send me that sheet." & vbCrLf & vbCrLf, "") & _
