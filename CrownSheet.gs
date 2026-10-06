@@ -51,14 +51,20 @@ var SHEET_NAME = 'quotes';
  * To stop a value being written at all, delete its line.
  */
 var COLUMNS = {
-  down_payment:    'down_payment',
+  total:           'Total premium',     // the total WITH the autoclub on it
+  down_payment:    'down_payment',      // the down payment WITH the autoclub on it
+  autoclub:        'autoclub',          // the amount added, on its own
   monthly_payment: 'monthly_payment',
   msg_to_customer: 'msg_to_customer',
-  total:           'total_quoted',      // <- tell me your heading for this
-  carrier:         'carrier',           // <- and this, if you want it
-  result:          'quote_result',      // <- and this
-  quote_link:      'quote_link',        // <- and this
-  request_id:      'website_request_id' // used to find the row next time
+  quote_link:      'quote_link',
+  request_id:      'website_request_id' // add this column - see ID_HEADING below
+
+  // Not written, because they are yours to fill in and not the carrier's:
+  //   payment_day, processing_fee, amount_paid, amount to company
+  // If you ever want one of them filled from a quote, add a line here.
+  // Also available if you want a column for them:
+  //   carrier_total, carrier_down   - the carrier's own figures, autoclub off
+  //   carrier, result, quoted_by, term
 };
 
 /**
