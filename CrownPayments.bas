@@ -30,7 +30,7 @@ Option Explicit
 Private Const UAIG_STALE_DAYS As Long = 60
 
 ' Which copy of this file is in the workbook. Run CrownVersion to see it.
-Public Const CROWN_PAYMENTS_VERSION As String = "5 Oct - Verve reads the Future tab"
+Public Const CROWN_PAYMENTS_VERSION As String = "6 Oct - recovers from a stuck page, and will not write what it cannot verify"
 
 ' The boxes and labels on Verve's own pages, named once so a change on
 ' their side is one line here rather than a hunt through the code.
@@ -57,6 +57,12 @@ Private Const VERVE_RPT_EXPORT As String = "ctl00_P_L_ReportDisplayForm_ReportVi
 ' it. His words: "Policies that have been cancelled for 60 days do not have
 ' to be accounted for."
 Private Const CANCELLED_LONG_ENOUGH As Long = 60
+
+' How many policies in a row may fail to open before something is done
+' about it. Three is comfortably more than a run of genuinely unknown
+' policy numbers; eight means the site is not answering at all.
+Private Const CONSECUTIVE_BEFORE_RELOAD As Long = 3
+Private Const CONSECUTIVE_BEFORE_GIVING_UP As Long = 8
 
 Private Const COL_POLICY As Long = 1     ' A  Policy Number
 Private Const COL_SITE As Long = 2       ' B  Website (the carrier)
@@ -1437,8 +1443,19 @@ Private Function CrownPageShows(ByVal drv As ChromeDriver, ByVal policyNo As Str
         If (ch >= "0" And ch <= "9") Or (ch >= "A" And ch <= "Z") Then wanted = wanted & ch
     Next i
 
-    If Len(wanted) < 4 Then
-        CrownPageShows = True                 ' too short to tell anything from
+    ' Too short to tell anything from - so the answer is NO.
+    '
+    ' This said True until 6 Oct, meaning "cannot check, carry on". On the
+    ' run of 5 Oct the browser got stuck on one policy's page for two
+    ' hours; every real policy number was correctly refused, but records
+    ' holding "999" and "NA" sailed through this line and were written
+    ' with the figures of whoever was on screen. Two customers ended up
+    ' holding a third customer's payment.
+    '
+    ' A wrong yes costs a customer's record. A wrong no costs one policy,
+    ' and it is reported rather than silent.
+    If Len(wanted) < 6 Then
+        CrownPageShows = False
         Exit Function
     End If
 
@@ -1650,6 +1667,46 @@ Private Function CrownVerveNextDue(ByVal rowsText As String, ByRef dueDate As St
 End Function
 
 
+' Could this be a policy number at all?
+'
+' Asked before anything is typed into the carrier's site, so a record
+' holding "999", "NA" or a blank gets a plain note rather than a lookup
+' that cannot be verified afterwards. Six characters and four digits is
+' below every real number any of these carriers issues - GAF20108199 has
+' ten of each - and comfortably above the junk.
+Private Function CrownLooksLikePolicy(ByVal policyNo As String) As Boolean
+    Dim i As Long, ch As String
+    Dim kept As String, digits As Long
+
+    For i = 1 To Len(policyNo)
+        ch = UCase$(Mid$(policyNo, i, 1))
+
+        If (ch >= "0" And ch <= "9") Then
+            kept = kept & ch
+            digits = digits + 1
+        ElseIf ch >= "A" And ch <= "Z" Then
+            kept = kept & ch
+        End If
+    Next i
+
+    CrownLooksLikePolicy = (Len(kept) >= 6 And digits >= 4)
+End Function
+
+' Get back to a page that has the quick lookup on it.
+'
+' Verve stops answering the lookup box now and then - a bad number, a
+' session that has gone stale, a dialog nobody saw. Until 6 Oct nothing
+' noticed, and a run would carry on asking a dead page for two hours.
+Private Function CrownVerveRecover(ByVal drv As ChromeDriver, ByVal By As Selenium.By, _
+                                   ByVal wsInput As Worksheet) As Boolean
+    On Error Resume Next
+    drv.Get wsInput.Range("URL_9").value
+    On Error GoTo 0
+
+    CrownVerveRecover = CrownWaitFor(drv, By, "ID", VERVE_LOOKUP_BOX, 45)
+End Function
+
+
 Public Sub CrownVervePaymentDue()
     Dim drv As ChromeDriver, clsDrv As Chrm
     Dim By As New Selenium.By
@@ -1664,6 +1721,7 @@ Public Sub CrownVervePaymentDue()
     Dim statuses As Object
     Dim reported As String, reportNote As String, cancelledOn As String
     Dim futureNote As String, futureDate As String, futureAmount As String
+    Dim missed As Long, stopped As Boolean, badNumber As Long
     Dim row As Long, done As Long, blank As Long, skipped As Long
     Dim i As Long
 
@@ -1737,6 +1795,18 @@ Public Sub CrownVervePaymentDue()
 
         If Len(policyNo) = 0 Then GoTo NextVerve
 
+        ' Not a policy number, so it is not looked up. Written down rather
+        ' than passed over in silence - a record holding "999" is something
+        ' he wants to know about and fix at his end.
+        If Not CrownLooksLikePolicy(policyNo) Then
+            ws.Cells(row, 1).value = recordId
+            ws.Cells(row, 2).value = policyNo
+            ws.Cells(row, 8).value = "that is not a policy number - nothing looked up, nothing written"
+            badNumber = badNumber + 1
+            row = row + 1
+            GoTo NextVerve
+        End If
+
         If CrownLongCancelled(parts, cancelledOn) Then
             ws.Cells(row, 1).value = recordId
             ws.Cells(row, 2).value = policyNo
@@ -1766,6 +1836,21 @@ Public Sub CrownVervePaymentDue()
             ' it would put this customer's record on another customer's
             ' figures, which is exactly what happened on United.
             note = "Verve did not open this policy - nothing written"
+            missed = missed + 1
+
+            ' A few in a row is not bad luck, it is a stuck page. Go back to
+            ' the start and see whether the lookup comes back; if it does
+            ' not, stop rather than spend two hours asking a dead page.
+            If missed = CONSECUTIVE_BEFORE_RELOAD Then
+                If CrownVerveRecover(drv, By, wsInput) Then
+                    note = note & " - went back to the start to clear it"
+                Else
+                    note = note & " - Verve stopped answering"
+                End If
+            ElseIf missed >= CONSECUTIVE_BEFORE_GIVING_UP Then
+                note = note & " - stopping, Verve is not answering"
+                stopped = True
+            End If
         ElseIf CrownWaitFor(drv, By, "XPATH", VERVE_BILLING_TAB, 25) Then
             ClickElement drv, VERVE_BILLING_TAB, "XPATH"
             drv.Wait 1000
@@ -1867,6 +1952,12 @@ VerveWrite:
         ws.Cells(row, 6).value = policyStatus
         ws.Cells(row, 7).value = Now
 
+        ' Anything read counts as the page answering again.
+        If Len(Trim$(dueAmount)) > 0 Or Len(Trim$(dueDate)) > 0 _
+           Or Len(Trim$(cancelDate)) > 0 Or Len(Trim$(policyStatus)) > 0 Then
+            missed = 0
+        End If
+
         If Len(Trim$(dueAmount)) = 0 And Len(Trim$(dueDate)) = 0 _
            And Len(Trim$(cancelDate)) = 0 And Len(Trim$(policyStatus)) = 0 Then
             ws.Cells(row, 8).value = Trim$("nothing found - left alone. " & note)
@@ -1900,14 +1991,19 @@ VerveWrite:
         row = row + 1
 
 NextVerve:
+        If stopped Then Exit For
     Next i
 
     ws.Activate
 
     MsgBox policies.Count & " Trisura (Verve) policies on the website." & vbCrLf & _
            skipped & " cancelled more than " & CANCELLED_LONG_ENOUGH & " days ago and passed over." & vbCrLf & _
+           badNumber & " had something in the policy number box that is not a policy number." & vbCrLf & _
            done & " written back to the website." & vbCrLf & _
-           blank & " had nothing to read and were left as they were." & vbCrLf & vbCrLf & _
+           blank & " had nothing to read and were left as they were." & vbCrLf & _
+           IIf(stopped, vbCrLf & "STOPPED EARLY: Verve stopped answering after " & _
+               CONSECUTIVE_BEFORE_GIVING_UP & " policies in a row. Nothing was written from " & _
+               "that point on. Run it again when the site is behaving." & vbCrLf, "") & vbCrLf & _
            reportNote & vbCrLf & vbCrLf & _
            "See the VervePayments sheet for the detail.", vbInformation, "Crown Superior"
 End Sub
