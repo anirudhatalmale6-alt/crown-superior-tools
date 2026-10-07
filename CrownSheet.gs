@@ -6,42 +6,67 @@
  * reads.
  *
  * ----------------------------------------------------------------------
- * THIS IS A SEPARATE SCRIPT PROJECT. Do not put it in the one attached to
- * your sheet.
+ * THIS MUST GO IN A BRAND NEW, EMPTY PROJECT.
  *
- * Google allows a project only ONE doPost, and the project on your sheet
- * already has one - that is your phone system. Two cannot live together,
- * and whichever wins, something stops working. So this one lives on its
- * own and reaches the sheet by its id. Your phone system is not touched,
- * not edited, and not redeployed.
+ * Not "Crown Customer lookup" and not the one attached to the sheet.
+ * Google allows a project only ONE doPost, and Crown Customer lookup
+ * already has one - that is your phone system. Two cannot live together.
+ * While my file sits in there it is being ignored, which is exactly what
+ * was happening.
  *
- * HOW TO SET IT UP  (about five minutes, once)
+ * HOW TO SET IT UP  (five minutes, once)
  *
- *  1. Go to  script.google.com  and click  New project
- *     (NOT Extensions - Apps Script from inside the sheet)
- *  2. Delete the empty myFunction and paste this whole file in
- *  3. Name the project Crown quotes, top left
- *  4. Change SECRET below to any word you like
- *  5. Click Deploy  ->  New deployment
- *       - the gear next to "Select type", choose  Web app
+ *  1. First tidy up: open Crown Customer lookup, click the three dots
+ *     next to CrownSheet.gs in the Files list, and Delete. Nothing else
+ *     in that project gets touched.
+ *
+ *  2. Go to  script.google.com  and click  New project
+ *     It opens with one file, Code.gs, holding an empty myFunction.
+ *
+ *  3. SELECT ALL of it and delete it, so the editor is completely empty,
+ *     THEN paste this file in.
+ *     Pasting without deleting first leaves my file inside myFunction,
+ *     and then nothing in it exists as a function of its own - which is
+ *     why the dropdown only offered myFunction.
+ *
+ *  4. Name the project Crown quotes, top left.
+ *
+ *  5. Fill in SHEET_ID below - see the note on it, it is a copy and paste
+ *     from your other script, not something to type out.
+ *
+ *  6. Change SECRET to your word - the same one saved on the website.
+ *
+ *  7. Deploy -> New deployment
+ *       - gear next to "Select type", choose  Web app
  *       - Execute as:        Me
  *       - Who has access:    Anyone
  *       - Deploy, then Authorize access and allow it
- *       - the first time it will warn you it is unverified: Advanced,
- *         then Go to Crown quotes (unsafe). It is your own script.
- *  6. Copy the Web app URL it gives you - it ends in /exec
+ *       - first time it warns you it is unverified: Advanced, then
+ *         "Go to Crown quotes (unsafe)". It is your own script.
  *
- * Then on the website: Get a quote -> Customer Quotes, and paste that
- * address and the same secret word into "The Google sheet the phone
- * system reads".
+ *  8. Copy the Web app URL - it ends in /exec - and paste it on the
+ *     website: Get a quote, Customer Quotes, "The Google sheet the phone
+ *     system reads".
  *
- * If you ever change this script, Deploy -> Manage deployments -> the
- * pencil -> Version: New version -> Deploy. The address stays the same.
+ * Before step 7, run testMe: pick it in the dropdown between Debug and
+ * Execution log, press Run, and read what it prints.
+ *
+ * If you ever change this script: Deploy -> Manage deployments -> pencil
+ * -> Version: New version -> Deploy. The address stays the same.
  * ----------------------------------------------------------------------
  */
 
-/** The CROWN PHONE sheet. From its own web address, between /d/ and /edit. */
-var SHEET_ID = '1M-4JswHCLCcEecxqYoJPIQcgptn0Yb8XpGTbBSPXtmM';
+/**
+ * Which spreadsheet to write to.
+ *
+ * DO NOT TYPE THIS OUT and do not copy it off a screenshot - it is forty
+ * random characters and a lower-case L looks exactly like a capital i.
+ *
+ * Copy it from a script you already know works: open Crown Customer
+ * lookup, look at line 18 of Code.gs, and copy the text between the
+ * quote marks on that line. Paste it between the quote marks here.
+ */
+var SHEET_ID = 'PASTE THE ID FROM Code.gs LINE 18 HERE';
 
 /** Any word you like. It must match the one saved on the website. */
 var SECRET = 'change-me';
@@ -192,23 +217,61 @@ function reply(obj) {
  * underneath (View -> Logs).
  */
 function testMe() {
-  var sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(SHEET_NAME);
+  if (SHEET_ID.indexOf('PASTE') === 0) {
+    Logger.log('SHEET_ID has not been filled in yet.');
+    Logger.log('Open Crown Customer lookup, Code.gs, line 18, and copy the text');
+    Logger.log('between the quote marks. Paste it into SHEET_ID at the top of this file.');
+    return;
+  }
+
+  var book;
+
+  try {
+    book = SpreadsheetApp.openById(SHEET_ID);
+  } catch (err) {
+    Logger.log('Could not open that spreadsheet: ' + err);
+    Logger.log('The id is almost certainly mistyped. Copy it from Code.gs line 18');
+    Logger.log('rather than typing it - a lower-case L and a capital i look identical.');
+    return;
+  }
+
+  Logger.log('Opened: ' + book.getName());
+
+  var sheet = book.getSheetByName(SHEET_NAME);
 
   if (!sheet) {
-    Logger.log('There is no tab called "' + SHEET_NAME + '". The tabs are: '
-      + SpreadsheetApp.openById(SHEET_ID).getSheets().map(function (s) { return s.getName(); }).join(', '));
+    Logger.log('There is no tab called "' + SHEET_NAME + '". The tabs are:');
+    Logger.log('   ' + book.getSheets().map(function (s) { return s.getName(); }).join(', '));
+    Logger.log('Set SHEET_NAME at the top of this file to whichever of those it should be.');
     return;
   }
 
   var headings = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   Logger.log('Tab "' + SHEET_NAME + '" has ' + (sheet.getLastRow() - 1) + ' rows.');
-  Logger.log('Headings: ' + headings.join(' | '));
 
   var lower = headings.map(function (h) { return String(h).trim().toLowerCase(); });
+  var missing = 0;
 
   for (var name in COLUMNS) {
     if (!COLUMNS.hasOwnProperty(name)) { continue; }
+
     var at = lower.indexOf(String(COLUMNS[name]).trim().toLowerCase());
+
+    if (at < 0) { missing++; }
+
     Logger.log((at < 0 ? 'NOT FOUND  ' : 'ok         ') + name + '  ->  ' + COLUMNS[name]);
+  }
+
+  if (missing) {
+    Logger.log('');
+    Logger.log(missing + ' column(s) were not found. Either add them to row 1 of the');
+    Logger.log('tab, or change the right-hand side in COLUMNS above to match what you');
+    Logger.log('already call them. Anything not found is simply skipped - it will not');
+    Logger.log('stop the rest working.');
+    Logger.log('');
+    Logger.log('Your headings are: ' + headings.join(' | '));
+  } else {
+    Logger.log('');
+    Logger.log('Every column found. Deploy it and paste the address on the website.');
   }
 }
