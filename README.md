@@ -17,6 +17,8 @@ the **Download raw file** button at the top right of the code.
 | `CrownPayments.bas` | Reads what is due from the carriers - United Auto, Trisura (Verve) - and writes it back to the website |
 | `CrownQuotes.bas` | Brings quote requests into the tool and hands one to the Edit Data page |
 | `CrownAPI.bas` | The connection to crownsuperior.com that the other two use |
+| `CrownUnblock.bas` | Getting past the alerts and pages that stop a United quote |
+| `CrownSheet.gs` | Goes on Google, not in Excel - see the top of the file |
 
 No passwords are in these files. The carrier logins stay on the **Input**
 sheet of your workbook, and the website key is stored inside the workbook
