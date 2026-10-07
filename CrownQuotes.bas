@@ -11,6 +11,11 @@ Option Explicit
 '   CrownImportQuoteFile   a Quotes sheet saved as a csv, picked by hand,
 '                          for when you would rather do it the old way
 '
+' And one on the way out:
+'
+'   CrownSendQuote         the quote you have just worked out, sent back to
+'                          the website and the Google sheet
+'
 ' Neither of them does the placing. Both write a file in the layout the
 ' website's quote export already has, and then hand it to your own
 ' ImportquoteToAlloutputsheet, which fills Output, and to
@@ -27,6 +32,16 @@ Private Const QUOTE_SHEET_FIRST As String = "saved_at"
 ' it - m54 sends SubmissionId to this column. It is what tells a quote
 ' already on the list from a new one.
 Private Const QUOTE_ID_HEADING As String = "Submitter's User ID"
+
+' What a cancelled input box looks like, told apart from an empty one.
+'
+' Pressing Cancel and leaving the box empty both hand back "", so without
+' something to tell them apart a cancelled quote carries on to the next
+' question instead of stopping.
+'
+' Declared up here because a module-level Const has to live in the
+' declarations section - one sitting after a procedure will not compile.
+Private Const CANCELLED As String = vbNullChar
 
 
 ' ---------------------------------------------------------------------
@@ -739,6 +754,183 @@ Private Function CrownKeepThem() As String
 
     CrownKeepThem = CrownKeepThem & "."
 End Function
+
+' ---------------------------------------------------------------------
+' 5. Sending the finished quote back
+' ---------------------------------------------------------------------
+'
+' Quote somebody the way you always have, then run this. It finds who is
+' on Edit Data, asks for the figures, and sends them to the website. The
+' website shows them on that customer's own page and writes them to the
+' Google sheet for the phone system.
+'
+' Nothing has to be retyped onto the website and nothing has to be found
+' on it - the request number travels with the quote.
+
+Public Sub CrownSendQuote()
+    Dim output As Worksheet
+    Dim columns As Long, idColumn As Long
+    Dim submissionId As Long
+    Dim who As String, answer As String
+    Dim carrier As String, premium As String, down As String
+    Dim monthly As String, term As String, note As String
+    Dim names As Variant, values As Variant
+
+    On Error Resume Next
+    Set output = ThisWorkbook.Sheets("Output")
+    On Error GoTo 0
+
+    If output Is Nothing Then
+        MsgBox "This needs the Output sheet.", vbExclamation, "Crown Superior"
+        Exit Sub
+    End If
+
+    columns = output.Cells(1, output.Columns.Count).End(xlToLeft).Column
+
+    If columns < 2 Then
+        MsgBox "There is no quote on Output." & vbCrLf & vbCrLf & _
+               "Put one there first: stand on the customer's row on Crown Quote List " & _
+               "and run CrownQuoteToEditData.", vbExclamation, "Crown Superior"
+        Exit Sub
+    End If
+
+    ' Row 2 of Output is the one quote CrownQuoteToEditData put there, and
+    ' it is the one Edit Data is showing. Taking the number from anywhere
+    ' else would risk sending this quote to a different customer.
+    idColumn = CrownColumnNamed(output, columns, QUOTE_ID_HEADING)
+
+    If idColumn > 0 Then submissionId = Val(output.Cells(2, idColumn).value)
+
+    who = CrownWhoIsOnRow(output, columns, 2)
+
+    If submissionId < 1 Then
+        answer = InputBox( _
+            "I cannot see a website request number on this quote." & vbCrLf & vbCrLf & _
+            "It is on the customer's card on the website - Get a quote, " & _
+            "Customer Quotes - and reads ""Request 12227"" or similar." & vbCrLf & vbCrLf & _
+            "Type the number:", "Crown Superior")
+
+        If Len(Trim$(answer)) = 0 Then Exit Sub
+
+        submissionId = Val(answer)
+
+        If submissionId < 1 Then
+            MsgBox "That is not a request number.", vbExclamation, "Crown Superior"
+            Exit Sub
+        End If
+    End If
+
+    carrier = Trim$(InputBox("Which company is this quote with?" & vbCrLf & vbCrLf & _
+                             "For: " & who, "Crown Superior - 1 of 5"))
+    If Len(carrier) = 0 Then Exit Sub
+
+    premium = CrownAskMoney("Total premium", who, carrier)
+    If premium = CANCELLED Then Exit Sub
+
+    down = CrownAskMoney("Down payment - the carrier's own figure, " & _
+                         "without your autoclub amount", who, carrier)
+    If down = CANCELLED Then Exit Sub
+
+    monthly = CrownAskMoney("Monthly payment", who, carrier)
+    If monthly = CANCELLED Then Exit Sub
+
+    term = Trim$(InputBox("How long is the term?" & vbCrLf & vbCrLf & _
+                          "For: " & who & " - " & carrier, "Crown Superior - 5 of 5", "6 months"))
+
+    note = Trim$(InputBox("Anything the customer should know?" & vbCrLf & vbCrLf & _
+                          "This is shown to them on their own page. Leave it blank if " & _
+                          "there is nothing to say.", "Crown Superior"))
+
+    ' Shown before it goes. These figures land on the customer's own page
+    ' and in the phone system, so the last chance to catch a slip is here
+    ' and not after they have read it.
+    If MsgBox("Send this to the website?" & vbCrLf & vbCrLf & _
+              "   Customer   " & who & vbCrLf & _
+              "   Request    " & submissionId & vbCrLf & _
+              "   Company    " & carrier & vbCrLf & _
+              "   Total      " & CrownOrNothing(premium) & vbCrLf & _
+              "   Down       " & CrownOrNothing(down) & vbCrLf & _
+              "   Monthly    " & CrownOrNothing(monthly) & vbCrLf & _
+              "   Term       " & CrownOrNothing(term) & vbCrLf & _
+              "   Note       " & CrownOrNothing(note) & vbCrLf & vbCrLf & _
+              "Your autoclub amount is added by the website, so the customer " & _
+              "will see more than the down payment above.", _
+              vbYesNo + vbQuestion, "Crown Superior") <> vbYes Then
+        Exit Sub
+    End If
+
+    names = Array("carrier", "state", "premium", "down", "monthly", "term", "note", "who")
+    values = Array(carrier, "quoted", premium, down, monthly, term, note, "the quoting tool")
+
+    answer = CrownQuoteResult(submissionId, names, values)
+
+    If Len(Trim$(answer)) = 0 Then
+        MsgBox "The website did not answer, so nothing was sent." & vbCrLf & vbCrLf & _
+               "Try again in a moment. Nothing has been half done - either it " & _
+               "arrives or it does not.", vbExclamation, "Crown Superior"
+
+        Exit Sub
+    End If
+
+    If InStr(1, answer, """ok"":true", vbTextCompare) = 0 Then
+        MsgBox "The website refused it:" & vbCrLf & vbCrLf & answer, _
+               vbExclamation, "Crown Superior"
+
+        Exit Sub
+    End If
+
+    MsgBox "Sent." & vbCrLf & vbCrLf & _
+           who & " can see this on their own quote page now." & _
+           IIf(InStr(1, answer, "written to the sheet", vbTextCompare) > 0, _
+               vbCrLf & "It is on the Google sheet as well.", _
+               vbCrLf & "The Google sheet is not connected, so it is on the website only.") & _
+           vbCrLf & vbCrLf & _
+           "Quoting the same company again replaces these figures rather " & _
+           "than adding a second quote.", vbInformation, "Crown Superior"
+End Sub
+
+Private Function CrownAskMoney(ByVal what As String, ByVal who As String, _
+                               ByVal carrier As String) As String
+    Dim answer As String
+
+    Do
+        answer = InputBox(what & "?" & vbCrLf & vbCrLf & _
+                          "For: " & who & " - " & carrier & vbCrLf & vbCrLf & _
+                          "Figures only - 1143.16, not $1,143.16. Leave it blank if " & _
+                          "this one does not apply.", "Crown Superior")
+
+        If StrPtr(answer) = 0 Then
+            CrownAskMoney = CANCELLED          ' Cancel, not an empty box
+
+            Exit Function
+        End If
+
+        answer = Trim$(answer)
+
+        If Len(answer) = 0 Then
+            CrownAskMoney = ""
+
+            Exit Function
+        End If
+
+        ' Cleaned rather than refused - somebody typing $1,143.16 means
+        ' 1143.16 and being told off for it helps nobody.
+        answer = Replace(Replace(Replace(answer, "$", ""), ",", ""), " ", "")
+
+        If IsNumeric(answer) Then
+            CrownAskMoney = answer
+
+            Exit Function
+        End If
+
+        MsgBox answer & " is not an amount. Try again.", vbExclamation, "Crown Superior"
+    Loop
+End Function
+
+Private Function CrownOrNothing(ByVal text As String) As String
+    CrownOrNothing = IIf(Len(Trim$(text)) = 0, "(not given)", text)
+End Function
+
 
 ' ---------------------------------------------------------------------
 ' 4. One quote onto Edit Data

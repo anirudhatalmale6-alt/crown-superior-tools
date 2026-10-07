@@ -6,33 +6,42 @@
  * reads.
  *
  * ----------------------------------------------------------------------
- * HOW TO PUT THIS ON YOUR SHEET  (about five minutes, once)
+ * THIS IS A SEPARATE SCRIPT PROJECT. Do not put it in the one attached to
+ * your sheet.
  *
- *  1. Open the CROWN PHONE sheet
- *  2. Extensions  ->  Apps Script
- *  3. DO NOT delete or change anything already in there. Whatever is
- *     already on this sheet is your phone system and it must be left
- *     alone. Instead click the + next to "Files" at the top left and
- *     choose Script, name it CrownSheet, and paste this file into the
- *     NEW empty file.
- *  4. Change SECRET below to any word you like, and change SHEET_NAME
- *     to the name on the tab if it is not "quotes"
+ * Google allows a project only ONE doPost, and the project on your sheet
+ * already has one - that is your phone system. Two cannot live together,
+ * and whichever wins, something stops working. So this one lives on its
+ * own and reaches the sheet by its id. Your phone system is not touched,
+ * not edited, and not redeployed.
+ *
+ * HOW TO SET IT UP  (about five minutes, once)
+ *
+ *  1. Go to  script.google.com  and click  New project
+ *     (NOT Extensions - Apps Script from inside the sheet)
+ *  2. Delete the empty myFunction and paste this whole file in
+ *  3. Name the project Crown quotes, top left
+ *  4. Change SECRET below to any word you like
  *  5. Click Deploy  ->  New deployment
  *       - the gear next to "Select type", choose  Web app
  *       - Execute as:        Me
  *       - Who has access:    Anyone
  *       - Deploy, then Authorize access and allow it
- *  6. Copy the Web app URL it gives you (it starts
- *     https://script.google.com/macros/s/... and ends /exec)
+ *       - the first time it will warn you it is unverified: Advanced,
+ *         then Go to Crown quotes (unsafe). It is your own script.
+ *  6. Copy the Web app URL it gives you - it ends in /exec
  *
  * Then on the website: Get a quote -> Customer Quotes, and paste that
  * address and the same secret word into "The Google sheet the phone
- * system reads". That is it.
+ * system reads".
  *
  * If you ever change this script, Deploy -> Manage deployments -> the
  * pencil -> Version: New version -> Deploy. The address stays the same.
  * ----------------------------------------------------------------------
  */
+
+/** The CROWN PHONE sheet. From its own web address, between /d/ and /edit. */
+var SHEET_ID = '1M-4JswHCLCcEecxqYoJPIQcgptn0Yb8XpGTbBSPXtmM';
 
 /** Any word you like. It must match the one saved on the website. */
 var SECRET = 'change-me';
@@ -85,7 +94,7 @@ function doPost(e) {
       return reply({ ok: false, error: 'wrong secret word' });
     }
 
-    var sheet = SpreadsheetApp.getActive().getSheetByName(SHEET_NAME);
+    var sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(SHEET_NAME);
 
     if (!sheet) {
       return reply({ ok: false, error: 'no tab called ' + SHEET_NAME });
@@ -183,11 +192,11 @@ function reply(obj) {
  * underneath (View -> Logs).
  */
 function testMe() {
-  var sheet = SpreadsheetApp.getActive().getSheetByName(SHEET_NAME);
+  var sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(SHEET_NAME);
 
   if (!sheet) {
     Logger.log('There is no tab called "' + SHEET_NAME + '". The tabs are: '
-      + SpreadsheetApp.getActive().getSheets().map(function (s) { return s.getName(); }).join(', '));
+      + SpreadsheetApp.openById(SHEET_ID).getSheets().map(function (s) { return s.getName(); }).join(', '));
     return;
   }
 

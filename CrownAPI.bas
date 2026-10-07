@@ -27,6 +27,8 @@ Option Explicit
 ' CrownSetKey macro.
 '
 ' Developer, Macros, and the four things you can run:
+'   CrownSendQuote       - send the quote you have just worked out back
+'                          to the website and the Google sheet
 '   CrownTestConnection  - is the website answering, is my key right
 '   CrownLoadQuotes      - put the newest quotes on a sheet
 '   CrownWriteQuoteBack  - send a finished quote back to the website
@@ -311,6 +313,25 @@ End Function
 ' Answers the server's reply. "written" is how many were saved and
 ' "unknown_fields" lists any name the form does not have - always worth
 ' a look, because a name that is not there is simply not written.
+' Send a finished quote back to the website.
+'
+' The website takes it from here: it puts it on the customer's own page
+' and, if the Google sheet is connected, writes it there too. One call,
+' three places, and no chance of the three disagreeing because somebody
+' typed it twice.
+'
+' submissionId is the website's request number, not a row number.
+Public Function CrownQuoteResult(ByVal submissionId As Long, _
+                                 ByRef names As Variant, ByRef values As Variant) As String
+    Dim body As String
+
+    body = CrownBody("quoteresult") _
+         & "&id=" & submissionId _
+         & "&values=" & CrownEnc(CrownJson(names, values))
+
+    CrownQuoteResult = CrownPost(body)
+End Function
+
 Public Function CrownUpdate(ByVal formId As Long, ByVal recordId As Long, _
                             ByRef names As Variant, ByRef values As Variant) As String
     Dim body As String
