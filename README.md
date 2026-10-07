@@ -18,6 +18,7 @@ the **Download raw file** button at the top right of the code.
 | `CrownQuotes.bas` | Brings quote requests into the tool and hands one to the Edit Data page |
 | `CrownAPI.bas` | The connection to crownsuperior.com that the other two use |
 | `CrownUnblock.bas` | Getting past the alerts and pages that stop a United quote |
+| `CrownRunner.bas` | Quotes the whole waiting queue without being asked each time |
 | `CrownSheet.gs` | Goes on Google, not in Excel - see the top of the file |
 
 No passwords are in these files. The carrier logins stay on the **Input**

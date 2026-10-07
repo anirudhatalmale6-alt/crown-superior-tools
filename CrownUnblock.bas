@@ -124,6 +124,16 @@ Public Function CrownHandleAlert(ByVal drv As Object) As Boolean
     ' press No the wording is kept and can be added to the list.
     CrownNoteBlocker "STOPPED, alert not recognised: " & Left$(text, 200)
 
+    ' Nobody is sitting there during a batch. Asking would put a box on
+    ' screen that waits five minutes, times out, and abandons the quote
+    ' anyway - so abandon it now and get on with the next one. The wording
+    ' is already on the QuoteLook sheet either way.
+    If CrownUnattended Then
+        CrownHandleAlert = False
+
+        Exit Function
+    End If
+
     answer = SmartMsgBox( _
         "United said:" & vbCrLf & vbCrLf & text & vbCrLf & vbCrLf & _
         "This one is not on the list of alerts that get waved through." & vbCrLf & _

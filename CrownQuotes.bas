@@ -1012,6 +1012,26 @@ Public Sub CrownQuoteToEditData()
 
     who = CrownWhoIsOnRow(list, columns, wanted)
 
+    CrownPlaceRow list, output, edit, columns, wanted
+
+    On Error Resume Next
+    edit.Activate
+    On Error GoTo 0
+
+    MsgBox "On Edit Data now:" & vbCrLf & vbCrLf & "   " & who & vbCrLf & vbCrLf & _
+           "Output is holding that one quote. Crown Quote List still has all of them.", _
+           vbInformation, "Crown Superior"
+End Sub
+
+' Whose quote is on this row, for the message - so he can see at a glance
+' that the right customer landed.
+' Put one row of Crown Quote List onto Output and bring it up on Edit
+' Data. The placing itself, with nothing about how the row was chosen -
+' so choosing it by hand and choosing it by request number end at exactly
+' the same state.
+Private Sub CrownPlaceRow(ByVal list As Worksheet, ByVal output As Worksheet, _
+                          ByVal edit As Worksheet, ByVal columns As Long, _
+                          ByVal wanted As Long)
     Application.ScreenUpdating = False
 
     output.Cells.Clear
@@ -1025,18 +1045,42 @@ Public Sub CrownQuoteToEditData()
     Application.ScreenUpdating = True
 
     RetrieveDataByRowNumber
-
-    On Error Resume Next
-    edit.Activate
-    On Error GoTo 0
-
-    MsgBox "On Edit Data now:" & vbCrLf & vbCrLf & "   " & who & vbCrLf & vbCrLf & _
-           "Output is holding that one quote. Crown Quote List still has all of them.", _
-           vbInformation, "Crown Superior"
 End Sub
 
-' Whose quote is on this row, for the message - so he can see at a glance
-' that the right customer landed.
+
+' The same, chosen by the website's request number rather than by where
+' the cursor happens to be - which is how the runner picks them, there
+' being no cursor at four in the morning.
+Public Function CrownLoadQuoteById(ByVal submissionId As Long, ByRef who As String) As Boolean
+    Dim list As Worksheet, output As Worksheet, edit As Worksheet
+    Dim columns As Long, lastRow As Long, idColumn As Long, r As Long
+
+    On Error Resume Next
+    Set list = ThisWorkbook.Sheets("Crown Quote List")
+    Set output = ThisWorkbook.Sheets("Output")
+    Set edit = ThisWorkbook.Sheets("Edit Data")
+    On Error GoTo 0
+
+    If list Is Nothing Or output Is Nothing Or edit Is Nothing Then Exit Function
+
+    columns = list.Cells(1, list.Columns.Count).End(xlToLeft).Column
+    lastRow = CrownLastUsedRow(list, columns)
+    idColumn = CrownColumnNamed(list, columns, QUOTE_ID_HEADING)
+
+    If columns < 2 Or lastRow < 2 Or idColumn < 1 Then Exit Function
+
+    For r = 2 To lastRow
+        If Val(list.Cells(r, idColumn).value) = submissionId Then
+            who = CrownWhoIsOnRow(list, columns, r)
+            CrownPlaceRow list, output, edit, columns, r
+            CrownLoadQuoteById = True
+
+            Exit Function
+        End If
+    Next r
+End Function
+
+
 Private Function CrownWhoIsOnRow(ByVal ws As Worksheet, ByVal columns As Long, _
                                  ByVal row As Long) As String
     Dim first As Long, last As Long, email As Long

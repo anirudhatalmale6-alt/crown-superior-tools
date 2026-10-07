@@ -313,6 +313,17 @@ End Function
 ' Answers the server's reply. "written" is how many were saved and
 ' "unknown_fields" lists any name the form does not have - always worth
 ' a look, because a name that is not there is simply not written.
+' What the website has waiting, and whether we may rate it.
+'
+' The answer carries rate_now as well as the list, so the tool cannot
+' start quoting before it has found out whether it is allowed. One
+' question, one answer - a separate "may I?" call could be answered yes
+' and then the switch turned off while the batch ran.
+Public Function CrownQuoteWork(Optional ByVal most As Long = 25) As String
+    CrownQuoteWork = CrownPost(CrownBody("quotework") & "&limit=" & most)
+End Function
+
+
 ' Send a finished quote back to the website.
 '
 ' The website takes it from here: it puts it on the customer's own page
