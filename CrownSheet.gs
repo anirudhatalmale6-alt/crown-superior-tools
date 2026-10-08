@@ -52,6 +52,10 @@
  *     website: Get a quote, Customer Quotes, "The Google sheet the phone
  *     system reads".
  *
+ * The headings below are the ones already on his sheet, read off the
+ * screenshot he sent - total_premium and auto_club, not the tidier names
+ * I had guessed. The sheet is right; the script was wrong.
+ *
  * Before step 7, run testMe: pick it in the dropdown between Debug and
  * Execution log, press Run, and read what it prints.
  *
@@ -95,9 +99,9 @@ var SHEET_NAME = 'quotes';
  * To stop a value being written at all, delete its line.
  */
 var COLUMNS = {
-  total:           'Total premium',     // the total WITH the autoclub on it
+  total:           'total_premium',    // the total WITH the autoclub on it
   down_payment:    'down_payment',      // the down payment WITH the autoclub on it
-  autoclub:        'autoclub',          // the amount added, on its own
+  autoclub:        'auto_club',         // the amount added, on its own
   monthly_payment: 'monthly_payment',
   msg_to_customer: 'msg_to_customer',
   quote_link:      'quote_link',
