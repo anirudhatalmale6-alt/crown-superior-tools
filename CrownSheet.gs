@@ -105,7 +105,7 @@ var COLUMNS = {
   monthly_payment: 'monthly_payment',
   msg_to_customer: 'msg_to_customer',
   quote_link:      'quote_link',
-  request_id:      'website_request_id' // add this column - see ID_HEADING below
+  request_id:      'website_request_id' // already on the sheet, column BG
 
   // Not written, because they are yours to fill in and not the carrier's:
   //   payment_day, processing_fee, amount_paid, amount to company
