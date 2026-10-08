@@ -34,7 +34,11 @@
  *  5. Fill in SHEET_ID below - see the note on it, it is a copy and paste
  *     from your other script, not something to type out.
  *
- *  6. Change SECRET to your word - the same one saved on the website.
+ *  6. Change SECRET to the word already saved on the website. It is
+ *     shown on the website at Get a quote -> Customer Quotes, in the box
+ *     "The Google sheet the phone system reads" - copy it exactly,
+ *     capital letter and all. If they do not match, nothing is written
+ *     and the website says so rather than failing quietly.
  *
  *  7. Deploy -> New deployment
  *       - gear next to "Select type", choose  Web app
@@ -68,8 +72,14 @@
  */
 var SHEET_ID = 'PASTE THE ID FROM Code.gs LINE 18 HERE';
 
-/** Any word you like. It must match the one saved on the website. */
-var SECRET = 'change-me';
+/**
+ * The password between the website and this script.
+ *
+ * It must be character for character the one already saved on the
+ * website - Get a quote, Customer Quotes, "The Google sheet the phone
+ * system reads". Copy it from there rather than typing it.
+ */
+var SECRET = 'PUT THE WORD FROM THE WEBSITE HERE';
 
 /** The tab the quotes are on. */
 var SHEET_NAME = 'quotes';
