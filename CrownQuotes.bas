@@ -156,12 +156,72 @@ Private Sub CrownSaveLastQuoteId(ByVal id As Long)
 End Sub
 
 ' How many quotes are in what came back - the header line is not one.
+' How many quotes are in the csv.
+'
+' NOT how many lines. A csv field holding an address or a note contains
+' newlines of its own, so one quote can span five lines - which is how
+' 200 quotes were reported as 997 and made a working import look like it
+' had lost most of them.
+'
+' The first column is always the quote number, so a line that begins with
+' digits and a comma starts a new record and everything else belongs to
+' the one above it.
 Private Function CrownCountRows(ByRef lines() As String) As Long
     Dim i As Long
 
     For i = 1 To UBound(lines)
-        If Len(Trim$(lines(i))) > 0 Then CrownCountRows = CrownCountRows + 1
+        If CrownStartsARecord(lines(i)) Then CrownCountRows = CrownCountRows + 1
     Next i
+End Function
+
+
+' Does this line begin a quote, or is it the middle of one?
+'
+' A number and a comma is not enough on its own. A wrapped address
+' line reading   30094, Conyers" ,note   passes that test, and the
+' high-water mark takes the LARGEST number it sees - so one zip code
+' at the start of a wrapped line would set the last-seen quote to
+' 30094 and skip every real quote until the numbering caught up.
+'
+' Found by testing the rule, not by reading it.
+'
+' So both of the first two columns have to look right: the quote
+' number, then DateSubmitted, which always begins yyyy-.
+Private Function CrownStartsARecord(ByVal line As String) As Boolean
+    Dim first As Long, second As Long
+    Dim head As String, stamp As String
+    Dim i As Long
+
+    first = InStr(1, line, ",")
+    If first < 2 Then Exit Function
+
+    head = Trim$(Left$(line, first - 1))
+    ' Every field comes back quoted - the first one is "12303", not
+    ' 12303 - so the quotes come off before anything is judged. The
+    ' first version of this rule missed that and called every line a
+    ' continuation, which would have reported 0 new quotes and
+    ' stopped the import dead.
+    head = Replace(head, Chr$(34), "")
+    If Len(head) = 0 Then Exit Function
+
+    For i = 1 To Len(head)
+        If Mid$(head, i, 1) < "0" Or Mid$(head, i, 1) > "9" Then Exit Function
+    Next i
+
+    second = InStr(first + 1, line, ",")
+    If second = 0 Then second = Len(line) + 1
+
+    stamp = Trim$(Mid$(line, first + 1, second - first - 1))
+    stamp = Replace(stamp, """", "")
+
+    If Len(stamp) < 5 Then Exit Function
+    If Mid$(stamp, 5, 1) <> "-" Then Exit Function
+
+    For i = 1 To 4
+        If Mid$(stamp, i, 1) < "0" Or Mid$(stamp, i, 1) > "9" Then Exit Function
+    Next i
+
+    CrownStartsARecord = True
 End Function
 
 ' The biggest quote number in what came back. Column A is the number.
@@ -169,8 +229,11 @@ Private Function CrownHighestId(ByRef lines() As String) As Long
     Dim parts() As String
     Dim i As Long, id As Long
 
+    ' Only the lines that start a record. A continuation line happens to
+    ' read as 0 today, but a note beginning with a long number would not,
+    ' and that would move the high-water mark past quotes never seen.
     For i = 1 To UBound(lines)
-        If Len(Trim$(lines(i))) > 0 Then
+        If CrownStartsARecord(lines(i)) Then
             parts = CrownSplitCsvLine(lines(i))
 
             If UBound(parts) >= 0 Then
@@ -696,7 +759,7 @@ Private Function CrownAppendToQuoteList(ByRef added As Long, ByRef already As Lo
     fromColumn.CompareMode = 1
 
     For c = 1 To sourceCols
-        heading = Trim$(CStr(source.Cells(1, c).value))
+        heading = CrownFlatHeading(CStr(source.Cells(1, c).value))
         If Len(heading) > 0 And Not fromColumn.Exists(heading) Then fromColumn.Add heading, c
     Next c
 
@@ -716,7 +779,9 @@ Private Function CrownAppendToQuoteList(ByRef added As Long, ByRef already As Lo
 
     idTarget = CrownColumnNamed(target, targetCols, QUOTE_ID_HEADING)
     idSource = 0
-    If fromColumn.Exists(QUOTE_ID_HEADING) Then idSource = fromColumn(QUOTE_ID_HEADING)
+    If fromColumn.Exists(CrownFlatHeading(QUOTE_ID_HEADING)) Then
+        idSource = fromColumn(CrownFlatHeading(QUOTE_ID_HEADING))
+    End If
 
     If idTarget = 0 Or idSource = 0 Then
         why = "there is no """ & QUOTE_ID_HEADING & """ column on " & _
@@ -745,7 +810,7 @@ Private Function CrownAppendToQuoteList(ByRef added As Long, ByRef already As Lo
             lastTargetRow = lastTargetRow + 1
 
             For c = 1 To targetCols
-                heading = Trim$(CStr(target.Cells(1, c).value))
+                heading = CrownFlatHeading(CStr(target.Cells(1, c).value))
 
                 If Len(heading) > 0 Then
                     If fromColumn.Exists(heading) Then
@@ -760,22 +825,37 @@ Private Function CrownAppendToQuoteList(ByRef added As Long, ByRef already As Lo
         End If
     Next r
 
-    ' Columns the list wants that Output never sends. Counted once, on the
-    ' headings, not once per row.
+    ' Columns the list wants that Output never sends. NAMED, not just
+    ' counted: the two lists have to be read side by side to see which
+    ' heading on one is the same thing as which heading on the other, and
+    ' a number on its own cannot be paired with anything.
+    Dim unfilled As String
+
     For c = 1 To targetCols
         heading = Trim$(CStr(target.Cells(1, c).value))
+
         If Len(heading) > 0 Then
-            If Not fromColumn.Exists(heading) Then blanks = blanks + 1
+            ' Matched on the flattened name, but REPORTED with the sheet's
+            ' own spelling - he has to find the column by eye afterwards.
+            If Not fromColumn.Exists(CrownFlatHeading(heading)) Then
+                blanks = blanks + 1
+                If Len(unfilled) > 0 Then unfilled = unfilled & ", "
+                unfilled = unfilled & heading
+            End If
         End If
     Next c
 
     If blanks > 0 Then
-        why = blanks & " column(s) on the list are not sent by the website and were left blank"
+        why = blanks & " column(s) on the list get nothing from the website: " & unfilled
     End If
 
     If Len(orphans) > 0 Then
-        If Len(why) > 0 Then why = why & "; "
-        why = why & "the list has no column for: " & Left$(orphans, 200)
+        If Len(why) > 0 Then why = why & vbCrLf
+        why = why & "the website sends these and the list has nowhere to put them: " & orphans
+    End If
+
+    If Len(why) > 0 Then
+        why = why & vbCrLf & "Rename one side to match the other and they will line up."
     End If
 
     CrownAppendToQuoteList = True
@@ -817,12 +897,39 @@ Private Function CrownSameHeadings(ByVal source As Worksheet, ByVal target As Wo
     CrownSameHeadings = True
 End Function
 
+' A heading reduced to its words, for matching only.
+'
+' Runs of whitespace become one space and non-breaking spaces become
+' ordinary ones first - those survive Trim and cannot be seen, so a
+' heading carrying one looks identical to the eye and matches nothing.
+'
+' The heading itself is never changed by this; both sheets keep whatever
+' they have. This is only what the two are compared ON.
+Private Function CrownFlatHeading(ByVal heading As String) As String
+    Dim out As String
+
+    out = Replace(heading, Chr$(160), " ")
+    out = Replace(out, vbTab, " ")
+    out = Replace(out, vbCr, " ")
+    out = Replace(out, vbLf, " ")
+
+    Do While InStr(1, out, "  ") > 0
+        out = Replace(out, "  ", " ")
+    Loop
+
+    CrownFlatHeading = Trim$(out)
+End Function
+
+
 Private Function CrownColumnNamed(ByVal ws As Worksheet, ByVal columns As Long, _
                                   ByVal heading As String) As Long
     Dim c As Long
+    Dim want As String
+
+    want = CrownFlatHeading(heading)
 
     For c = 1 To columns
-        If StrComp(Trim$(CStr(ws.Cells(1, c).value)), heading, vbTextCompare) = 0 Then
+        If StrComp(CrownFlatHeading(CStr(ws.Cells(1, c).value)), want, vbTextCompare) = 0 Then
             CrownColumnNamed = c
             Exit Function
         End If
