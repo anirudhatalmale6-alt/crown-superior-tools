@@ -48,36 +48,51 @@ Private Const CANCELLED As String = vbNullChar
 ' 1. The website's quotes, only what is new
 ' ---------------------------------------------------------------------
 
+' The button. Everything it does is in CrownFetchReport; this only
+' decides that a person is watching and so a box is worth showing.
 Public Sub CrownFetchNewQuotes()
+    MsgBox CrownFetchReport(), vbInformation, "Crown Superior"
+End Sub
+
+
+' Bring in whatever the website has that the workbook has not seen.
+'
+' Says nothing on screen - everything comes back as text, and the caller
+' decides whether a person is there to read it. That is what lets the
+' unattended runner call it: a message box at 2am is a run that is still
+' stopped in the morning.
+'
+' @return what happened, in the words the box used to use
+Public Function CrownFetchReport() As String
     Dim csv As String, path As String, kept As String
     Dim lines() As String
     Dim highest As Long, since As Long
     Dim brought As Long
+    Dim saved As Boolean
+    Dim nextTime As String
 
     since = CrownLastQuoteId()
 
     csv = CrownPost(CrownBody("quotecsv") & "&limit=200&since_id=" & since)
 
     If Len(csv) = 0 Then
-        MsgBox "The website did not answer. Nothing has changed." & vbCrLf & vbCrLf & _
-               "If it stays like this, use CrownImportQuoteFile and pick a file instead.", _
-               vbExclamation, "Crown Superior"
-        Exit Sub
+        CrownFetchReport = "The website did not answer. Nothing has changed." & vbCrLf & _
+                           "If it stays like this, use CrownImportQuoteFile and pick a file instead."
+        Exit Function
     End If
 
     If Left$(csv, 5) = "error" Then
-        MsgBox "The website answered: " & csv, vbExclamation, "Crown Superior"
-        Exit Sub
+        CrownFetchReport = "The website answered: " & csv
+        Exit Function
     End If
 
     lines = Split(Replace(csv, vbCrLf, vbLf), vbLf)
     brought = CrownCountRows(lines)
 
     If brought = 0 Then
-        MsgBox "No new quotes since the last fetch." & vbCrLf & vbCrLf & _
-               "The last one brought in was number " & since & ".", _
-               vbInformation, "Crown Superior"
-        Exit Sub
+        CrownFetchReport = "No new quotes since the last fetch. " & _
+                           "The last one brought in was number " & since & "."
+        Exit Function
     End If
 
     highest = CrownHighestId(lines)
@@ -92,14 +107,25 @@ Public Sub CrownFetchNewQuotes()
     ' good and nothing would ever say so.
     If InStr(1, kept, "NOT added") = 0 And highest > since Then
         CrownSaveLastQuoteId highest
+        saved = True
     End If
 
-    MsgBox brought & " new quote(s) brought in." & vbCrLf & _
-           kept & vbCrLf & _
-           "Edit Data is showing the row you had open." & vbCrLf & vbCrLf & _
-           "Next time this will start from quote number " & highest & ".", _
-           vbInformation, "Crown Superior"
-End Sub
+    ' Say what was actually remembered, not what would have been. The old
+    ' wording promised "next time this will start from 12303" on a run
+    ' where the number had deliberately NOT been saved, which reads as
+    ' though those quotes had been swallowed.
+    If saved Then
+        nextTime = "Next time this will start from quote number " & highest & "."
+    Else
+        nextTime = "Nothing was remembered, so the same quotes will come again next time. " & _
+                   "The last one on record is still number " & since & "."
+    End If
+
+    CrownFetchReport = brought & " new quote(s) brought in." & vbCrLf & _
+                       kept & vbCrLf & _
+                       "Edit Data is showing the row you had open." & vbCrLf & vbCrLf & _
+                       nextTime
+End Function
 
 ' The last quote number brought in, remembered in the workbook itself so
 ' it survives closing it.
@@ -608,11 +634,13 @@ End Function
 Private Function CrownAppendToQuoteList(ByRef added As Long, ByRef already As Long, _
                                         ByRef why As String) As Boolean
     Dim source As Worksheet, target As Worksheet
-    Dim seen As Object
-    Dim lastSourceRow As Long, lastTargetRow As Long, columns As Long
-    Dim idColumn As Long
-    Dim r As Long, c As Long
-    Dim id As String
+    Dim seen As Object, fromColumn As Object
+    Dim lastSourceRow As Long, lastTargetRow As Long
+    Dim sourceCols As Long, targetCols As Long
+    Dim idSource As Long, idTarget As Long
+    Dim r As Long, c As Long, blanks As Long
+    Dim heading As String, id As String
+    Dim orphans As String
 
     added = 0
     already = 0
@@ -633,14 +661,14 @@ Private Function CrownAppendToQuoteList(ByRef added As Long, ByRef already As Lo
         Exit Function
     End If
 
-    columns = source.Cells(1, source.Columns.Count).End(xlToLeft).Column
+    sourceCols = source.Cells(1, source.Columns.Count).End(xlToLeft).Column
 
-    If columns < 2 Then
+    If sourceCols < 2 Then
         why = "Output has no headings on it"
         Exit Function
     End If
 
-    lastSourceRow = CrownLastUsedRow(source, columns)
+    lastSourceRow = CrownLastUsedRow(source, sourceCols)
 
     If lastSourceRow < 2 Then
         CrownAppendToQuoteList = True              ' nothing came in; nothing to do
@@ -649,43 +677,106 @@ Private Function CrownAppendToQuoteList(ByRef added As Long, ByRef already As Lo
 
     ' An empty list gets Output's headings, so the first run sets it up.
     If Len(Trim$(CStr(target.Cells(1, 1).value))) = 0 Then
-        source.Range(source.Cells(1, 1), source.Cells(1, columns)).Copy _
-            target.Cells(1, 1)
-        Application.CutCopyMode = False
+        For c = 1 To sourceCols
+            target.Cells(1, c).value = source.Cells(1, c).value
+        Next c
     End If
 
-    If Not CrownSameHeadings(source, target, columns, why) Then Exit Function
+    targetCols = target.Cells(1, target.Columns.Count).End(xlToLeft).Column
 
-    idColumn = CrownColumnNamed(target, columns, QUOTE_ID_HEADING)
-    lastTargetRow = CrownLastUsedRow(target, columns)
+    If targetCols < 2 Then
+        why = "Crown Quote List has no headings on it"
+        Exit Function
+    End If
+
+    ' Which column on Output each heading lives in. Matched by NAME, so a
+    ' heading renamed or moved on either sheet costs that one column at
+    ' worst instead of stopping the whole import.
+    Set fromColumn = CreateObject("Scripting.Dictionary")
+    fromColumn.CompareMode = 1
+
+    For c = 1 To sourceCols
+        heading = Trim$(CStr(source.Cells(1, c).value))
+        If Len(heading) > 0 And Not fromColumn.Exists(heading) Then fromColumn.Add heading, c
+    Next c
+
+    ' Anything Output has that the list has no home for. Reported rather
+    ' than dropped silently - a column quietly going missing is how you
+    ' find out six months later that nobody has the mileage.
+    For c = 1 To sourceCols
+        heading = Trim$(CStr(source.Cells(1, c).value))
+
+        If Len(heading) > 0 Then
+            If CrownColumnNamed(target, targetCols, heading) = 0 Then
+                If Len(orphans) > 0 Then orphans = orphans & ", "
+                orphans = orphans & heading
+            End If
+        End If
+    Next c
+
+    idTarget = CrownColumnNamed(target, targetCols, QUOTE_ID_HEADING)
+    idSource = 0
+    If fromColumn.Exists(QUOTE_ID_HEADING) Then idSource = fromColumn(QUOTE_ID_HEADING)
+
+    If idTarget = 0 Or idSource = 0 Then
+        why = "there is no """ & QUOTE_ID_HEADING & """ column on " & _
+              IIf(idTarget = 0, "Crown Quote List", "Output") & _
+              ", so a quote already on the list could not be recognised." & vbCrLf & _
+              "Nothing has been copied."
+        Exit Function
+    End If
+
+    lastTargetRow = CrownLastUsedRow(target, targetCols)
 
     Set seen = CreateObject("Scripting.Dictionary")
     seen.CompareMode = 1
 
-    If idColumn > 0 Then
-        For r = 2 To lastTargetRow
-            id = Trim$(CStr(target.Cells(r, idColumn).value))
-            If Len(id) > 0 And Not seen.Exists(id) Then seen.Add id, True
-        Next r
-    End If
+    For r = 2 To lastTargetRow
+        id = Trim$(CStr(target.Cells(r, idTarget).value))
+        If Len(id) > 0 And Not seen.Exists(id) Then seen.Add id, True
+    Next r
 
     For r = 2 To lastSourceRow
-        id = ""
-        If idColumn > 0 Then id = Trim$(CStr(source.Cells(r, idColumn).value))
+        id = Trim$(CStr(source.Cells(r, idSource).value))
 
         If Len(id) > 0 And seen.Exists(id) Then
             already = already + 1
         Else
             lastTargetRow = lastTargetRow + 1
 
-            source.Range(source.Cells(r, 1), source.Cells(r, columns)).Copy
-            target.Cells(lastTargetRow, 1).PasteSpecial xlPasteValues
-            Application.CutCopyMode = False
+            For c = 1 To targetCols
+                heading = Trim$(CStr(target.Cells(1, c).value))
+
+                If Len(heading) > 0 Then
+                    If fromColumn.Exists(heading) Then
+                        target.Cells(lastTargetRow, c).value = _
+                            source.Cells(r, fromColumn(heading)).value
+                    End If
+                End If
+            Next c
 
             If Len(id) > 0 Then seen.Add id, True
             added = added + 1
         End If
     Next r
+
+    ' Columns the list wants that Output never sends. Counted once, on the
+    ' headings, not once per row.
+    For c = 1 To targetCols
+        heading = Trim$(CStr(target.Cells(1, c).value))
+        If Len(heading) > 0 Then
+            If Not fromColumn.Exists(heading) Then blanks = blanks + 1
+        End If
+    Next c
+
+    If blanks > 0 Then
+        why = blanks & " column(s) on the list are not sent by the website and were left blank"
+    End If
+
+    If Len(orphans) > 0 Then
+        If Len(why) > 0 Then why = why & "; "
+        why = why & "the list has no column for: " & Left$(orphans, 200)
+    End If
 
     CrownAppendToQuoteList = True
 End Function
@@ -703,6 +794,9 @@ Private Function CrownLastUsedRow(ByVal ws As Worksheet, ByVal columns As Long) 
     If Not found Is Nothing Then CrownLastUsedRow = found.Row
 End Function
 
+' No longer used - kept because it is the clearest statement of why the
+' copy must never be positional, and it is worth being able to run it by
+' hand if two sheets ever need comparing.
 Private Function CrownSameHeadings(ByVal source As Worksheet, ByVal target As Worksheet, _
                                    ByVal columns As Long, ByRef why As String) As Boolean
     Dim c As Long
@@ -753,6 +847,12 @@ Private Function CrownKeepThem() As String
     End If
 
     CrownKeepThem = CrownKeepThem & "."
+
+    ' why is not only for failures any more - it carries what did not line
+    ' up on a copy that otherwise worked.
+    If Len(why) > 0 Then
+        CrownKeepThem = CrownKeepThem & vbCrLf & "Worth knowing: " & why & "."
+    End If
 End Function
 
 ' ---------------------------------------------------------------------

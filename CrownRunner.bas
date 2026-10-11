@@ -108,6 +108,22 @@ Public Sub CrownRunQuotes()
 
     CrownUnattended = True
 
+    ' Bring the new quotes into the workbook first.
+    '
+    ' The runner asks the website what is waiting and then looks each one
+    ' up in the workbook. A quote that has come in since the last fetch is
+    ' not there yet, and the run logs "could not find that quote in the
+    ' tool" for every single one - which is what happened to Eltiana
+    ' Jones. Remembering to press another button first is not something an
+    ' unattended runner should need.
+    '
+    ' Quietly, because a message box would stop the run until somebody
+    ' pressed OK. Whatever it says goes on the RunLog instead.
+    ws.Cells(row, 1).value = Now
+    ws.Cells(row, 6).value = "bringing new quotes in: " & _
+        Replace(Replace(CrownFetchReport(), vbCrLf, " "), vbLf, " ")
+    row = row + 1
+
     On Error GoTo Finished
 
     For i = 1 To ids.Count
