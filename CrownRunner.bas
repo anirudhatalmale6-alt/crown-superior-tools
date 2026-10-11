@@ -77,11 +77,25 @@ Public Sub CrownRunQuotes()
     rateNow = (InStr(1, json, """rate_now"":true", vbTextCompare) > 0)
 
     If Not rateNow Then
-        MsgBox "Rating through the carriers is switched OFF on the website, " & _
-               "so nothing has been quoted." & vbCrLf & vbCrLf & _
-               "To turn it on: Get a quote, Customer Quotes, " & _
-               """Rating quotes through the carriers"".", _
-               vbInformation, "Crown Superior"
+        ' Two different reasons with two different fixes: the switch is
+        ' off, or the switch is on and it is the wrong time of day. One
+        ' message for both sends him looking at the wrong thing. The
+        ' website decides both and says which.
+        If InStr(1, json, """rate_on"":true", vbTextCompare) > 0 Then
+            MsgBox "Rating is switched on, but the website only sends quotes out " & _
+                   "to the carriers " & CrownJsonText(json, 1, "rate_hours") & _
+                   ", and it makes the time " & CrownJsonText(json, 1, "rate_hour") & _
+                   ":00 right now." & vbCrLf & vbCrLf & _
+                   "Nothing has been quoted. To change the hours: Get a quote, " & _
+                   "Customer Quotes, ""Only rate between"".", _
+                   vbInformation, "Crown Superior"
+        Else
+            MsgBox "Rating through the carriers is switched OFF on the website, " & _
+                   "so nothing has been quoted." & vbCrLf & vbCrLf & _
+                   "To turn it on: Get a quote, Customer Quotes, " & _
+                   """Rating quotes through the carriers"".", _
+                   vbInformation, "Crown Superior"
+        End If
 
         Exit Sub
     End If
