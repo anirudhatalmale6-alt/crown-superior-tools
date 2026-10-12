@@ -340,11 +340,16 @@ Public Sub CrownCompareQuoteHeadings()
 
     Set out = CrownSheet("Quote Headings")
     out.Cells.ClearContents
-    out.Range("A1:B1").value = Array( _
-        "On CROWN QUOTE LIST but the website never fills it", _
-        "The WEBSITE sends it but the list has nowhere to put it")
-    out.Columns(1).ColumnWidth = 52
-    out.Columns(2).ColumnWidth = 52
+    ' Four columns: each heading with where it is, so he can go straight
+    ' to it on the sheet instead of scrolling for it.
+    out.Range("A1:D1").value = Array( _
+        "On CROWN QUOTE LIST but the website never fills it", "Where on Crown Quote List", _
+        "The WEBSITE sends it but the list has nowhere to put it", "Where on Output")
+    out.Columns(1).ColumnWidth = 44
+    out.Columns(2).ColumnWidth = 22
+    out.Columns(3).ColumnWidth = 44
+    out.Columns(4).ColumnWidth = 22
+    out.Rows(1).Font.Bold = True
 
     ' Columns on his list that nothing will ever fill.
     row = 1
@@ -356,6 +361,7 @@ Public Sub CrownCompareQuoteHeadings()
             If CrownColumnNamed(output, outCols, heading) = 0 Then
                 row = row + 1
                 out.Cells(row, 1).value = heading
+                out.Cells(row, 2).value = "column " & CrownColumnLetter(list, c) & " (" & c & ")"
                 missing = missing + 1
             Else
                 matched = matched + 1
@@ -372,7 +378,8 @@ Public Sub CrownCompareQuoteHeadings()
         If Len(heading) > 0 Then
             If CrownColumnNamed(list, listCols, heading) = 0 Then
                 row = row + 1
-                out.Cells(row, 2).value = heading
+                out.Cells(row, 3).value = heading
+                out.Cells(row, 4).value = "column " & CrownColumnLetter(output, c) & " (" & c & ")"
                 spare = spare + 1
             End If
         End If
@@ -825,7 +832,7 @@ Private Function CrownAppendToQuoteList(ByRef added As Long, ByRef already As Lo
         If Len(heading) > 0 Then
             If CrownColumnNamed(target, targetCols, heading) = 0 Then
                 If Len(orphans) > 0 Then orphans = orphans & ", "
-                orphans = orphans & heading
+                orphans = orphans & heading & CrownWhere(source, c)
             End If
         End If
     Next c
@@ -893,18 +900,19 @@ Private Function CrownAppendToQuoteList(ByRef added As Long, ByRef already As Lo
             If Not fromColumn.Exists(CrownFlatHeading(heading)) Then
                 blanks = blanks + 1
                 If Len(unfilled) > 0 Then unfilled = unfilled & ", "
-                unfilled = unfilled & heading
+                unfilled = unfilled & heading & CrownWhere(target, c)
             End If
         End If
     Next c
 
     If blanks > 0 Then
-        why = blanks & " column(s) on the list get nothing from the website: " & unfilled
+        why = blanks & " column(s) on Crown Quote List get nothing from the website: " & unfilled
     End If
 
     If Len(orphans) > 0 Then
         If Len(why) > 0 Then why = why & vbCrLf
-        why = why & "the website sends these and the list has nowhere to put them: " & orphans
+        why = why & "the website sends these (columns on Output) and the list has nowhere " & _
+              "to put them: " & orphans
     End If
 
     If Len(why) > 0 Then
@@ -948,6 +956,19 @@ Private Function CrownSameHeadings(ByVal source As Worksheet, ByVal target As Wo
     Next c
 
     CrownSameHeadings = True
+End Function
+
+' A column as the sheet shows it: "BK" for 63.
+'
+' Taken from Excel's own address for the cell rather than worked out by
+' hand, so it cannot disagree with the letters along the top of the sheet.
+Private Function CrownColumnLetter(ByVal ws As Worksheet, ByVal c As Long) As String
+    CrownColumnLetter = Split(ws.Cells(1, c).Address(True, False), "$")(0)
+End Function
+
+' "(column BK, 63)" - letter for finding it, number for counting.
+Private Function CrownWhere(ByVal ws As Worksheet, ByVal c As Long) As String
+    CrownWhere = " (column " & CrownColumnLetter(ws, c) & ", " & c & ")"
 End Function
 
 ' A heading reduced to its words, for matching only.
