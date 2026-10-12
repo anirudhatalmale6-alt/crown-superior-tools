@@ -50,6 +50,107 @@ Option Explicit
 ' =====================================================================
 
 
+' What United said the last time it refused a quote outright, for the
+' runner to pass on to the website. Cleared by the runner before each
+' quote, so one customer's weather notice never lands on the next.
+Public CrownLastStopReason As String
+
+' The last alert of any kind, for the RunLog.
+Public CrownLastAlert As String
+
+' How many times running the same alert has been waved through. His macro
+' answers Yes by clicking the same button again, so an alert that comes
+' back on every click would go round for ever.
+Private CrownAlertRepeats As Long
+
+
+' The alerts that mean "not today".
+'
+' Not harmless, so they are not waved through - waving the weather one
+' through leaves a liability-only quote looking like the full coverage
+' the customer asked for. Not unknown either, so nobody is asked. The
+' quote stops, United's own words are kept, and the runner sends them
+' to the website as the quote's note.
+Private Function CrownStopAlerts() As Variant
+    CrownStopAlerts = Array( _
+        "adverse weather", _
+        "no physical damage", _
+        "physical damage could", _
+        "not accepting", _
+        "further notice")
+End Function
+
+Public Function CrownAlertIsStop(ByVal text As String) As Boolean
+    Dim stops As Variant
+    Dim i As Long
+
+    stops = CrownStopAlerts()
+
+    For i = LBound(stops) To UBound(stops)
+        If InStr(1, text, CStr(stops(i)), vbTextCompare) > 0 Then
+            CrownAlertIsStop = True
+
+            Exit Function
+        End If
+    Next i
+End Function
+
+
+' The answer to "Website Alert: ... Press Yes to Continue and No to Stop".
+'
+' His United macro asks that same question in six different places, each
+' with its own short list of alerts it already knows. Every one of them
+' now asks this instead, so there is one list and adding to it fixes all
+' six at once.
+'
+'   vbYes - carry on (a known alert, already accepted by his code)
+'   vbNo  - stop this quote
+Public Function CrownAlertAnswer(ByVal text As String) As VbMsgBoxResult
+    If StrComp(CrownLastAlert, Trim$(text), vbTextCompare) = 0 Then
+        CrownAlertRepeats = CrownAlertRepeats + 1
+    Else
+        CrownAlertRepeats = 0
+    End If
+
+    CrownLastAlert = Trim$(text)
+
+    If CrownAlertRepeats >= 3 Then
+        CrownNoteBlocker "STOPPED, the same alert came back 4 times: " & Left$(text, 200)
+        CrownAlertAnswer = vbNo
+
+        Exit Function
+    End If
+
+    If CrownAlertIsStop(text) Then
+        CrownLastStopReason = Trim$(text)   ' United's own words, no carrier name - the customer sees this note
+        CrownNoteBlocker "STOPPED, United will not quote: " & Left$(text, 200)
+        CrownAlertAnswer = vbNo
+
+        Exit Function
+    End If
+
+    If CrownAlertIsKnown(text) Then
+        CrownNoteBlocker "waved through: " & Left$(text, 120)
+        CrownAlertAnswer = vbYes
+
+        Exit Function
+    End If
+
+    CrownNoteBlocker "STOPPED, alert not recognised: " & Left$(text, 200)
+
+    ' Nobody is there to answer, and a box would wait five minutes and
+    ' then give up anyway. Stop now; the wording is on QuoteLook.
+    If CrownUnattended Then
+        CrownAlertAnswer = vbNo
+
+        Exit Function
+    End If
+
+    CrownAlertAnswer = SmartMsgBox("Website Alert: " & text & vbCrLf & vbCrLf & _
+        "Press Yes to Continue and No to Stop", vbYesNo + vbInformation, "Alert Detected")
+End Function
+
+
 ' The alerts that do not need you.
 '
 ' Each of these is United telling you something rather than asking you
@@ -68,7 +169,9 @@ Private Function CrownKnownAlerts() As Variant
         "photo", _
         "pictures are required", _
         "picture", _
-        "images are required")
+        "images are required", _
+        "agency fees", _
+        "ordering mvr")
 End Function
 
 Public Function CrownAlertIsKnown(ByVal text As String) As Boolean
@@ -112,6 +215,16 @@ Public Function CrownHandleAlert(ByVal drv As Object) As Boolean
     drv.SwitchToAlert.Accept
     Err.Clear
     On Error GoTo 0
+
+    CrownLastAlert = Trim$(text)
+
+    If CrownAlertIsStop(text) Then
+        CrownLastStopReason = Trim$(text)   ' United's own words, no carrier name - the customer sees this note
+        CrownNoteBlocker "STOPPED, United will not quote: " & Left$(text, 200)
+        CrownHandleAlert = False
+
+        Exit Function
+    End If
 
     If CrownAlertIsKnown(text) Then
         CrownNoteBlocker "waved through: " & Left$(text, 120)

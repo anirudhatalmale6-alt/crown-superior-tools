@@ -64,6 +64,7 @@ Public Sub CrownRunQuotes()
     Dim carrier As String, down As String, monthly As String, term As String
     Dim ws As Worksheet, row As Long
     Dim before As Long, after As Long
+    Dim stopped As Long
 
     json = CrownQuoteWork(RUN_MOST)
 
@@ -157,6 +158,10 @@ Public Sub CrownRunQuotes()
         Else
             before = CrownQuotePayRows()
 
+            ' One customer's "not today" must never be read as the next one's.
+            CrownLastStopReason = ""
+            CrownLastAlert = ""
+
             ' His own quoting, exactly as he runs it by hand.
             On Error Resume Next
             Err.Clear
@@ -169,10 +174,34 @@ Public Sub CrownRunQuotes()
 
             If after > before Then
                 CrownReadQuotePayRow after, down, monthly, term
+            ElseIf Len(CrownLastStopReason) > 0 Then
+                ' United said no for a reason of its own - the weather notice.
+                ' His words: "I would expect this msg to be transposed back to
+                ' the quote". So it goes to the website as this quote's note,
+                ' marked as being worked on rather than refused, because it is
+                ' United saying not today, not the customer being turned down.
+                Dim told As String
+
+                told = CrownQuoteResult(CLng(ids(i)), _
+                    Array("carrier", "state", "note", "who"), _
+                    Array(carrier, "working", CrownLastStopReason, "the quoting tool"))
+
+                If InStr(1, told, """ok"":true", vbTextCompare) > 0 Then
+                    note = "United would not quote - sent to the website: " & CrownLastStopReason
+                Else
+                    note = "United would not quote (" & CrownLastStopReason & _
+                           ") and the website refused the note: " & Left$(told, 80)
+                End If
+
+                stopped = stopped + 1
             ElseIf Len(note) = 0 Then
                 ' Nothing was written, so nothing was quoted. Said plainly
                 ' rather than sending a blank quote to a customer.
                 note = "no payment plan came back - nothing sent"
+
+                If Len(CrownLastAlert) > 0 Then
+                    note = note & " (why: " & Left$(CrownLastAlert, 120) & ")"
+                End If
             End If
         End If
 
@@ -190,7 +219,7 @@ Public Sub CrownRunQuotes()
                 inARow = inARow + 1
                 note = Trim$(note & " the website refused it: " & Left$(answer, 90))
             End If
-        Else
+        ElseIf Len(CrownLastStopReason) = 0 Then
             failed = failed + 1
             inARow = inARow + 1
         End If
@@ -219,6 +248,8 @@ Finished:
 
     MsgBox ids.Count & " quote(s) were waiting." & vbCrLf & _
            did & " quoted and sent to the website." & vbCrLf & _
+           IIf(stopped > 0, stopped & " United would not quote today - its reason was sent " & _
+               "to the website." & vbCrLf, "") & _
            failed & " came back with nothing and were left for you." & vbCrLf & vbCrLf & _
            IIf(inARow >= RUN_STOP_AFTER, _
                "It stopped early because " & inARow & " in a row came back with nothing - " & _
