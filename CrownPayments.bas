@@ -1834,6 +1834,7 @@ Public Sub CrownVervePaymentDue()
     Dim sessionNote As String
     Dim dismissed As Long
     Dim look As Long, looked As Long
+    Dim pageWords As String, quiet As Long
     Dim wsLook As Worksheet, lookRow As Long
     Dim row As Long, done As Long, blank As Long, skipped As Long
     Dim i As Long
@@ -2020,7 +2021,20 @@ Public Sub CrownVervePaymentDue()
             '
             ' Only consulted when today is clear. A policy in arrears owes
             ' that money now and today's figure has to win.
-            If Val("0" & dueAmount) <= 0 Then
+            ' "Next Activity: NONE" with "Future Premium $0.00" is Verve saying
+            ' nothing is scheduled at all - paid up, or the term is over.
+            ' There is no Future table to find on those, and the last run
+            ' counted all ten of them as pages it could not read.
+            pageWords = ""
+            If UCase$(Trim$(activity)) = "NONE" Then
+                pageWords = CStr(drv.ExecuteScript("return (document.body&&document.body.innerText)||'';"))
+                pageWords = Replace(Replace(pageWords, vbCr, " "), vbLf, " ")
+            End If
+
+            If InStr(1, pageWords, "Future Premium $0.00", vbTextCompare) > 0 Then
+                note = "nothing scheduled at Verve (Next Activity NONE, Future Premium $0.00)"
+                quiet = quiet + 1
+            ElseIf Val("0" & dueAmount) <= 0 Then
                 ' And again here. The billing tab is a fresh request, and
                 ' the box can come back between one and the next.
                 If Left$(CrownVerveKeepAlive(drv), 7) = "pressed" Then
@@ -2160,6 +2174,8 @@ NextVerve:
            badNumber & " had something in the policy number box that is not a policy number." & vbCrLf & _
            done & " written back to the website." & vbCrLf & _
            blank & " had nothing to read and were left as they were." & vbCrLf & _
+           IIf(quiet > 0, quiet & " have nothing scheduled at Verve (Next Activity NONE, " & _
+               "Future Premium $0.00) - nothing owed, nothing to read." & vbCrLf, "") & _
            IIf(stopped, vbCrLf & "STOPPED EARLY: Verve stopped answering after " & _
                CONSECUTIVE_BEFORE_GIVING_UP & " policies in a row. Nothing was written from " & _
                "that point on. Run it again when the site is behaving." & vbCrLf, "") & vbCrLf & _
@@ -2550,7 +2566,14 @@ Private Function CrownVerveStatuses(ByVal drv As ChromeDriver, ByVal By As Selen
     Set map = CrownCsvLookup(path, "polic", "status", heading, found)
     Set CrownVerveStatuses = map
 
-    If found = 0 Then
+    If found = 0 And InStr(1, path, "DailyTransactions", vbTextCompare) > 0 Then
+        ' What arrives is Policy Daily Transactions: one line per
+        ' cancellation, reinstatement, renewal or new policy - not a status
+        ' per policy. Reading "Reinstatement" as a status would be a guess.
+        note = "The Verve report is Policy Daily Transactions - it lists cancellations, " & _
+               "reinstatements and renewals, not each policy's status - so each status " & _
+               "is as that policy's own billing line reads it."
+    ElseIf found = 0 Then
         note = "the report came down but no column in it could be read as a policy number" & vbCrLf & _
                "with a status beside it. Nothing was written to any policy's status." & vbCrLf & _
                "Its heading row was: " & Left$(heading, 240)

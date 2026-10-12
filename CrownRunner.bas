@@ -5,8 +5,9 @@ Option Explicit
 ' Crown Superior - quoting the queue without being asked each time
 ' ---------------------------------------------------------------------
 ' Leave the tool open and run this. It asks the website what is waiting,
-' quotes each one through United the way you already do, sends the answer
-' back, and writes down what happened to every single one.
+' quotes each one through United and then Verve the way you already do,
+' sends each answer back, and writes down what happened to every single
+' one - a RunLog line per carrier. The Verve leg is CrownVerveQuote.
 '
 ' It does NOT decide on its own that it is allowed. The switch lives on
 ' the website - Get a quote, Customer Quotes, "Rating quotes through the
@@ -34,11 +35,10 @@ Option Explicit
 ' it does not know are written down and that one quote is abandoned -
 ' unattended, there is nobody to ask.
 '
-' It cannot get past two things that are in the quoting module itself:
-' the "Could not find payment plan details" box, and the retry question
-' the error handler asks. Both are ordinary message boxes and they will
-' sit there until somebody presses them. Say the word and I will give
-' those the same treatment.
+' The message boxes inside his United and Verve macros (Complete, the
+' retry questions, the employer-name prompts, "Could not find payment
+' plan details", "Please fix the error") are skipped while this runs and
+' the reason goes on the RunLog line instead.
 ' =====================================================================
 
 ' Set while a batch is running. CrownUnblock reads it and stops asking
@@ -65,6 +65,8 @@ Public Sub CrownRunQuotes()
     Dim ws As Worksheet, row As Long
     Dim before As Long, after As Long
     Dim stopped As Long
+    Dim loaded As Boolean
+    Dim vDid As Long, vFailed As Long
 
     json = CrownQuoteWork(RUN_MOST)
 
@@ -153,7 +155,9 @@ Public Sub CrownRunQuotes()
         ws.Cells(row, 2).value = ids(i)
         ws.Cells(row, 3).value = who
 
-        If Not CrownLoadQuoteById(CLng(ids(i)), who) Then
+        loaded = CrownLoadQuoteById(CLng(ids(i)), who)
+
+        If Not loaded Then
             note = "could not find that quote in the tool - run CrownFetchNewQuotes first"
         Else
             before = CrownQuotePayRows()
@@ -229,6 +233,19 @@ Public Sub CrownRunQuotes()
         ws.Cells(row, 6).value = note
         row = row + 1
 
+        ' Then Verve for the same customer - whatever United did. If United
+        ' would not quote (the weather notice) this is the price they get.
+        If loaded Then
+            If CrownRunVerve(ws, row, CLng(ids(i)), who) Then
+                vDid = vDid + 1
+                inARow = 0
+            Else
+                vFailed = vFailed + 1
+            End If
+
+            row = row + 1
+        End If
+
         DoEvents
 
         If inARow >= RUN_STOP_AFTER Then
@@ -247,7 +264,9 @@ Finished:
     On Error GoTo 0
 
     MsgBox ids.Count & " quote(s) were waiting." & vbCrLf & _
-           did & " quoted and sent to the website." & vbCrLf & _
+           did & " quoted with United and sent to the website." & vbCrLf & _
+           vDid & " quoted with Verve and sent to the website." & vbCrLf & _
+           IIf(vFailed > 0, vFailed & " got no Verve price - the RunLog says why." & vbCrLf, "") & _
            IIf(stopped > 0, stopped & " United would not quote today - its reason was sent " & _
                "to the website." & vbCrLf, "") & _
            failed & " came back with nothing and were left for you." & vbCrLf & vbCrLf & _
@@ -411,4 +430,42 @@ Private Function CrownRunSheet() As Worksheet
     ws.Columns(6).ColumnWidth = 80
 
     Set CrownRunSheet = ws
+End Function
+
+
+' One customer through Verve, its RunLog line written, its price sent.
+'
+' True when a price reached the website.
+Private Function CrownRunVerve(ByVal ws As Worksheet, ByVal row As Long, _
+                               ByVal id As Long, ByVal who As String) As Boolean
+    Dim down As String, monthly As String, term As String
+    Dim note As String, answer As String
+
+    ws.Cells(row, 1).value = Now
+    ws.Cells(row, 2).value = id
+    ws.Cells(row, 3).value = who & " (Verve)"
+
+    On Error Resume Next
+    Err.Clear
+    note = CrownVerveQuote(down, monthly, term)
+    If Err.Number <> 0 Then note = "Verve: stopped - " & Err.Description
+    Err.Clear
+    On Error GoTo 0
+
+    If Len(down) > 0 Or Len(monthly) > 0 Then
+        answer = CrownQuoteResult(id, _
+            Array("carrier", "state", "down", "monthly", "term", "who"), _
+            Array("Verve", "quoted", down, monthly, term, "the quoting tool"))
+
+        If InStr(1, answer, """ok"":true", vbTextCompare) > 0 Then
+            CrownRunVerve = True
+            note = note & " - sent"
+        Else
+            note = note & " - the website refused it: " & Left$(answer, 90)
+        End If
+    End If
+
+    ws.Cells(row, 4).value = down
+    ws.Cells(row, 5).value = monthly
+    ws.Cells(row, 6).value = note
 End Function
