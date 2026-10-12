@@ -43,6 +43,14 @@ Private Const QUOTE_ID_HEADING As String = "Submitter's User ID"
 ' declarations section - one sitting after a procedure will not compile.
 Private Const CANCELLED As String = vbNullChar
 
+' How many quotes one fetch asks for.
+'
+' Two hundred is already about two megabytes of text coming back, so
+' this is not raised lightly. The website hands back the OLDEST unseen
+' ones first, which is what lets several runs work through a backlog
+' without leaving a gap behind them.
+Private Const FETCH_BATCH As Long = 200
+
 
 ' ---------------------------------------------------------------------
 ' 1. The website's quotes, only what is new
@@ -73,7 +81,7 @@ Public Function CrownFetchReport() As String
 
     since = CrownLastQuoteId()
 
-    csv = CrownPost(CrownBody("quotecsv") & "&limit=200&since_id=" & since)
+    csv = CrownPost(CrownBody("quotecsv") & "&limit=" & FETCH_BATCH & "&since_id=" & since)
 
     If Len(csv) = 0 Then
         CrownFetchReport = "The website did not answer. Nothing has changed." & vbCrLf & _
@@ -116,6 +124,14 @@ Public Function CrownFetchReport() As String
     ' though those quotes had been swallowed.
     If saved Then
         nextTime = "Next time this will start from quote number " & highest & "."
+
+        ' A full batch almost always means more are waiting. Saying so
+        ' beats leaving him to guess whether one run was enough.
+        If brought >= FETCH_BATCH Then
+            nextTime = nextTime & vbCrLf & vbCrLf & _
+                       "That is a full batch of " & FETCH_BATCH & ", so there are probably " & _
+                       "more waiting. Run CrownFetchNewQuotes again until it says there are none."
+        End If
     Else
         nextTime = "Nothing was remembered, so the same quotes will come again next time. " & _
                    "The last one on record is still number " & since & "."
@@ -281,18 +297,24 @@ Public Sub CrownFetchQuotesFrom()
 End Sub
 
 
-' Put the two heading rows side by side so the difference can be seen.
+' Which headings line up, and which do not.
 '
-' When the append refuses it names the first column where Output and Crown
-' Quote List disagree, which is enough to know something is wrong but not
-' always enough to know why. This writes both rows out in full, marks every
-' column where they differ, and leaves it on a sheet you can send me.
+' Run this whenever you like - it reads only, copies nothing, changes
+' nothing.
 '
-' It reads only. Nothing is copied, changed or cleared by it.
+' It used to compare column 1 against column 1, column 2 against column
+' 2, and so on. That was right when the copy went across by position.
+' The copy matches on the heading NAME now, so where a column sits no
+' longer matters at all, and comparing by position would have had him
+' renaming things that were already working perfectly.
+'
+' Spacing does not matter either - "Driver  3 JOB TITLE" and
+' "Driver 3 JOB TITLE" are the same column. Only the words.
 Public Sub CrownCompareQuoteHeadings()
     Dim output As Worksheet, list As Worksheet, out As Worksheet
-    Dim wide As Long, c As Long, differences As Long
-    Dim a As String, b As String
+    Dim outCols As Long, listCols As Long, c As Long, row As Long
+    Dim heading As String
+    Dim matched As Long, missing As Long, spare As Long
 
     On Error Resume Next
     Set output = ThisWorkbook.Sheets("Output")
@@ -302,47 +324,78 @@ Public Sub CrownCompareQuoteHeadings()
     If output Is Nothing Or list Is Nothing Then
         MsgBox "This needs both the Output and Crown Quote List sheets.", _
                vbExclamation, "Crown Superior"
+
         Exit Sub
     End If
 
-    wide = output.Cells(1, output.Columns.Count).End(xlToLeft).Column
+    outCols = output.Cells(1, output.Columns.Count).End(xlToLeft).Column
+    listCols = list.Cells(1, list.Columns.Count).End(xlToLeft).Column
 
-    If list.Cells(1, list.Columns.Count).End(xlToLeft).Column > wide Then
-        wide = list.Cells(1, list.Columns.Count).End(xlToLeft).Column
-    End If
+    If outCols < 1 Or listCols < 1 Then
+        MsgBox "One of the two sheets has no headings on it. Run " & _
+               "CrownFetchNewQuotes once and try again.", vbExclamation, "Crown Superior"
 
-    If wide < 1 Then
-        MsgBox "Neither sheet has any headings on it.", vbExclamation, "Crown Superior"
         Exit Sub
     End If
 
     Set out = CrownSheet("Quote Headings")
     out.Cells.ClearContents
-    out.Range("A1:D1").value = Array("Column", "Output says", "Crown Quote List says", "Same?")
+    out.Range("A1:B1").value = Array( _
+        "On CROWN QUOTE LIST but the website never fills it", _
+        "The WEBSITE sends it but the list has nowhere to put it")
+    out.Columns(1).ColumnWidth = 52
+    out.Columns(2).ColumnWidth = 52
 
-    For c = 1 To wide
-        a = Trim$(CStr(output.Cells(1, c).value))
-        b = Trim$(CStr(list.Cells(1, c).value))
+    ' Columns on his list that nothing will ever fill.
+    row = 1
 
-        out.Cells(c + 1, 1).value = c
-        out.Cells(c + 1, 2).value = a
-        out.Cells(c + 1, 3).value = b
+    For c = 1 To listCols
+        heading = Trim$(CStr(list.Cells(1, c).value))
 
-        If StrComp(a, b, vbTextCompare) = 0 Then
-            out.Cells(c + 1, 4).value = "yes"
-        Else
-            out.Cells(c + 1, 4).value = "NO"
-            differences = differences + 1
+        If Len(heading) > 0 Then
+            If CrownColumnNamed(output, outCols, heading) = 0 Then
+                row = row + 1
+                out.Cells(row, 1).value = heading
+                missing = missing + 1
+            Else
+                matched = matched + 1
+            End If
         End If
     Next c
 
-    out.Columns("A:D").AutoFit
-    out.Activate
+    ' Columns the website sends that have nowhere to go.
+    row = 1
 
-    MsgBox wide & " columns compared." & vbCrLf & _
-           differences & " of them differ." & vbCrLf & vbCrLf & _
-           "The Quote Headings sheet has both rows side by side. Send me that " & _
-           "sheet and I will tell you which import to run.", _
+    For c = 1 To outCols
+        heading = Trim$(CStr(output.Cells(1, c).value))
+
+        If Len(heading) > 0 Then
+            If CrownColumnNamed(list, listCols, heading) = 0 Then
+                row = row + 1
+                out.Cells(row, 2).value = heading
+                spare = spare + 1
+            End If
+        End If
+    Next c
+
+    out.Activate
+    out.Range("A1").Select
+
+    If missing = 0 And spare = 0 Then
+        MsgBox matched & " heading(s) line up and every one of them is copied." & vbCrLf & _
+               vbCrLf & "Nothing is out of step.", vbInformation, "Crown Superior"
+
+        Exit Sub
+    End If
+
+    MsgBox matched & " heading(s) line up and are copied." & vbCrLf & vbCrLf & _
+           missing & " column(s) on Crown Quote List get nothing from the website." & vbCrLf & _
+           spare & " column(s) the website sends have nowhere to go." & vbCrLf & vbCrLf & _
+           "Both lists are on the Quote Headings sheet, side by side. Where one on " & _
+           "the left is plainly the same thing as one on the right under another " & _
+           "name, rename the Crown Quote List heading to match the website and they " & _
+           "will join up." & vbCrLf & vbCrLf & _
+           "Send me that sheet if you would rather I told you which to change.", _
            vbInformation, "Crown Superior"
 End Sub
 
