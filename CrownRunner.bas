@@ -45,6 +45,11 @@ Option Explicit
 ' questions nobody is there to answer.
 Public CrownUnattended As Boolean
 
+' Set while CrownAutoQuoting's timer is the one running this. No boxes at
+' all then - a box at 3am waits for a morning that has not come, and the
+' timer behind it stops too. What would have been said goes on RunLog.
+Public CrownAutoMode As Boolean
+
 ' How many in a row may fail before it gives up on the batch. A single
 ' bad quote is a bad quote; four in a row is something wrong with the
 ' carrier's site or with the sign-in, and grinding through fifty more
@@ -71,13 +76,21 @@ Public Sub CrownRunQuotes()
     json = CrownQuoteWork(RUN_MOST)
 
     If Len(Trim$(json)) = 0 Then
-        MsgBox "The website did not answer, so nothing has been done.", _
-               vbExclamation, "Crown Superior"
+        If CrownAutoMode Then
+            CrownAutoNote "the website did not answer - will try again next time"
+        Else
+            MsgBox "The website did not answer, so nothing has been done.", _
+                   vbExclamation, "Crown Superior"
+        End If
 
         Exit Sub
     End If
 
     rateNow = (InStr(1, json, """rate_now"":true", vbTextCompare) > 0)
+
+    ' Outside the hours, or switched off: the timer simply asks again in a
+    ' while. Nothing to say - it would be the same line every 15 minutes.
+    If Not rateNow And CrownAutoMode Then Exit Sub
 
     If Not rateNow Then
         ' Two different reasons with two different fixes: the switch is
@@ -108,20 +121,25 @@ Public Sub CrownRunQuotes()
     CrownReadWorkList json, ids, names
 
     If ids.Count = 0 Then
-        MsgBox "Nothing is waiting to be quoted.", vbInformation, "Crown Superior"
+        If Not CrownAutoMode Then MsgBox "Nothing is waiting to be quoted.", vbInformation, "Crown Superior"
 
         Exit Sub
     End If
 
+    If Not CrownAutoMode Then
     If MsgBox(ids.Count & " quote(s) waiting." & vbCrLf & vbCrLf & _
               "This will quote each one through United and send the answer " & _
               "back to the website. You can leave it running." & vbCrLf & vbCrLf & _
               "Carry on?", vbYesNo + vbQuestion, "Crown Superior") <> vbYes Then
         Exit Sub
     End If
+    End If
 
-    Set ws = CrownRunSheet()
-    row = 2
+    ' By hand, RunLog starts clean. On the timer it is added to, so a
+    ' night's worth of runs can be read in the morning.
+    Set ws = CrownRunSheet(CrownAutoMode)
+    row = ws.Cells(ws.Rows.Count, 1).End(xlUp).row + 1
+    If row < 2 Then row = 2
 
     CrownUnattended = True
 
@@ -258,6 +276,8 @@ Public Sub CrownRunQuotes()
 
 Finished:
     CrownUnattended = False
+
+    If CrownAutoMode Then Exit Sub
 
     On Error Resume Next
     ws.Activate
@@ -412,7 +432,7 @@ End Function
 
 
 ' The sheet every run writes to.
-Private Function CrownRunSheet() As Worksheet
+Private Function CrownRunSheet(Optional ByVal keep As Boolean = False) As Worksheet
     Dim ws As Worksheet
 
     On Error Resume Next
@@ -422,6 +442,13 @@ Private Function CrownRunSheet() As Worksheet
     If ws Is Nothing Then
         Set ws = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
         ws.Name = "RunLog"
+    End If
+
+    ' Kept, but not for ever: past 2000 lines it starts again.
+    If keep And ws.Cells(ws.Rows.Count, 1).End(xlUp).row < 2000 Then
+        Set CrownRunSheet = ws
+
+        Exit Function
     End If
 
     ws.Cells.ClearContents
@@ -469,3 +496,18 @@ Private Function CrownRunVerve(ByVal ws As Worksheet, ByVal row As Long, _
     ws.Cells(row, 5).value = monthly
     ws.Cells(row, 6).value = note
 End Function
+
+
+' One line on RunLog for something the timer would otherwise have said in
+' a box.
+Public Sub CrownAutoNote(ByVal what As String)
+    Dim ws As Worksheet
+    Dim row As Long
+
+    Set ws = CrownRunSheet(True)
+    row = ws.Cells(ws.Rows.Count, 1).End(xlUp).row + 1
+    If row < 2 Then row = 2
+
+    ws.Cells(row, 1).value = Now
+    ws.Cells(row, 6).value = what
+End Sub
