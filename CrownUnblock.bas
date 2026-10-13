@@ -151,6 +151,49 @@ Public Function CrownAlertAnswer(ByVal text As String) As VbMsgBoxResult
 End Function
 
 
+' Pick a deductible on United's quote screen without tripping over the
+' pop-up it raises.
+'
+' His SelectOption clicks the list, clicks the option, then clicks the list
+' again to close it. Picking 250/500/1000 makes United say "Photos required
+' for this coverage" - and that last click lands on an open pop-up, fails,
+' is retried twenty times and gives up. So the run died INSIDE SelectOption,
+' before the check that comes after it ever ran.
+'
+' This sets the list directly and lets the page react a moment later, so
+' the pop-up arrives after we have finished, where CrownHandleAlert takes
+' it. Blank or "Select" (no deductibles on the request) picks "none".
+'
+' Returns False only when the list is not on the page at all.
+Public Function CrownPickOption(ByVal drv As Object, ByVal id As String, _
+                                ByVal wanted As String) As Boolean
+    Dim answer As Variant
+
+    wanted = Trim$(wanted)
+    If Len(wanted) = 0 Or StrComp(wanted, "Select", vbTextCompare) = 0 Then wanted = "none"
+
+    On Error Resume Next
+    answer = drv.ExecuteScript( _
+        "var s=document.getElementById(arguments[0]);if(!s)return 'missing';" & _
+        "var w=(arguments[1]+'').trim().toLowerCase(),hit=-1;" & _
+        "for(var i=0;i<s.options.length;i++){var o=s.options[i];" & _
+        "if((o.text||'').trim().toLowerCase()===w||(o.value||'').trim().toLowerCase()===w){hit=i;break;}}" & _
+        "if(hit<0)return 'no option '+w;" & _
+        "s.selectedIndex=hit;" & _
+        "setTimeout(function(){s.dispatchEvent(new Event('change',{bubbles:true}));},50);" & _
+        "return 'ok';", id, wanted)
+    If Err.Number <> 0 Then answer = "error: " & Err.Description
+    Err.Clear
+    On Error GoTo 0
+
+    drv.Wait 1500
+
+    If CStr(answer) <> "ok" Then CrownNoteBlocker "deductible " & id & " = " & wanted & ": " & CStr(answer)
+
+    CrownPickOption = (CStr(answer) <> "missing")
+End Function
+
+
 ' The alerts that do not need you.
 '
 ' Each of these is United telling you something rather than asking you
