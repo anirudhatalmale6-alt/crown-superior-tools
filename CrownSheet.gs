@@ -3,7 +3,17 @@
  *
  * The website sends one quote at a time to this script. The script finds
  * the customer's row and fills in the payment columns the phone system
- * reads.
+ * reads. A customer who is not on the sheet yet gets a new row at the
+ * bottom, filled in from their website request under your own headings.
+ *
+ * UPDATING FROM AN EARLIER VERSION
+ *   1. In the editor, copy your two lines SHEET_ID = ... and SECRET = ...
+ *      somewhere safe (Notepad).
+ *   2. Select all, delete, paste this file in.
+ *   3. Put your SHEET_ID and SECRET values back in.
+ *   4. Save, then Deploy -> Manage deployments -> pencil ->
+ *      Version: New version -> Deploy. The web address stays the same,
+ *      so nothing on the website needs changing.
  *
  * ----------------------------------------------------------------------
  * THIS MUST GO IN A BRAND NEW, EMPTY PROJECT.
@@ -144,9 +154,19 @@ function doPost(e) {
                         .map(function (h) { return String(h).trim().toLowerCase(); });
 
     var row = findRow(sheet, headings, body);
+    var added = false;
 
+    // A customer who is not on the sheet yet - a request straight off the
+    // website. Their row is added at the bottom under YOUR headings (none
+    // are renamed or added), then the quote is filled in like any other.
     if (!row) {
-      return reply({ ok: false, error: 'no row for ' + (body.email || body.request_id) });
+      row = addRow(sheet, headings, body);
+      added = true;
+
+      if (!row) {
+        return reply({ ok: false, error: 'no row for ' + (body.email || body.request_id) +
+                                         ' and nothing to start a new one with' });
+      }
     }
 
     var wrote = 0;
@@ -171,7 +191,7 @@ function doPost(e) {
       sheet.getRange(row, idAt + 1).setValue(body.request_id);
     }
 
-    return reply({ ok: true, row: row, wrote: wrote });
+    return reply({ ok: true, row: row, wrote: wrote, added: added });
   } catch (err) {
     return reply({ ok: false, error: String(err) });
   }
@@ -216,6 +236,101 @@ function findRow(sheet, headings, body) {
   }
 
   return found;
+}
+
+
+/**
+ * Which website question goes under which of your headings, where the two
+ * are not simply the same words. Left: your heading. Right: the question's
+ * name on the website's Get a quote form.
+ *
+ * Anything not listed is matched by its words - "Gender" fills "gender",
+ * "Marital Status" fills "marital_status" - so this list only needs the
+ * ones worded differently. Add a line here if a column stays empty that
+ * should not.
+ */
+var NEW_ROW_FROM = {
+  quote_type:           'Coverage',
+  how_did_you_hear:     'Source',
+  phone:                'Phone number',
+  dob:                  'Date of Birth',
+  city:                 'CIty',
+  zip:                  'Zip_Code',
+  drivers_license:      'Drivers License Number',
+  drivers_license_number: 'Drivers License Number',
+  license_state:        'DL_state',
+  industry:             'Industry_',
+  job_title:            'JOB_TITLE_',
+  previous_insurance:   'Previous insurance'
+};
+
+/** "Marital Status " -> "maritalstatus": the words, nothing else. */
+function flat(text) {
+  return String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+/** The list entry for a heading: exact, or one the heading starts with. */
+function aliasFor(aliases, want) {
+  if (aliases[want]) { return aliases[want]; }
+  for (var a in aliases) {
+    if (aliases.hasOwnProperty(a) && a.length >= 8 && want.indexOf(a) === 0) { return aliases[a]; }
+  }
+  return '';
+}
+
+/**
+ * Add a row for a customer the sheet has not seen.
+ *
+ * Every heading is looked up in what the website sent: first the list
+ * above, then the same words, then - for a heading that was cut short,
+ * like "how_did_you_he" - the one question whose name starts with it.
+ * A heading nothing matches is left empty. Nothing is ever renamed.
+ */
+function addRow(sheet, headings, body) {
+  var fields = body.fields || {};
+  var byFlat = {};
+
+  for (var name in fields) {
+    if (fields.hasOwnProperty(name)) { byFlat[flat(name)] = fields[name]; }
+  }
+
+  if (!body.email && !Object.keys(byFlat).length) { return 0; }
+
+  var aliases = {};
+  for (var h in NEW_ROW_FROM) {
+    if (NEW_ROW_FROM.hasOwnProperty(h)) { aliases[flat(h)] = flat(NEW_ROW_FROM[h]); }
+  }
+
+  var line = [];
+
+  for (var c = 0; c < headings.length; c++) {
+    var want = flat(headings[c]);
+    var value = '';
+
+    if (!want) {
+      value = '';
+    } else if (want === 'savedat') {
+      value = body.saved_at || new Date();
+    } else if (aliasFor(aliases, want) && byFlat[aliasFor(aliases, want)] !== undefined) {
+      value = byFlat[aliasFor(aliases, want)];
+    } else if (byFlat[want] !== undefined) {
+      value = byFlat[want];
+    } else if (want.length >= 5) {
+      // A heading cut short: the one question that starts with it.
+      var hits = Object.keys(byFlat).filter(function (k) { return k.indexOf(want) === 0; });
+      if (hits.length === 1) { value = byFlat[hits[0]]; }
+    }
+
+    if (value === '' && want === 'email') { value = body.email || ''; }
+    if (value === '' && want === 'firstname') { value = body.first_name || ''; }
+    if (value === '' && want === 'lastname') { value = body.last_name || ''; }
+
+    line.push(value);
+  }
+
+  sheet.appendRow(line);
+
+  return sheet.getLastRow();
 }
 
 
