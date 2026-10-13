@@ -1835,6 +1835,7 @@ Public Sub CrownVervePaymentDue()
     Dim dismissed As Long
     Dim look As Long, looked As Long
     Dim pageWords As String, quiet As Long
+    Dim notOpened As Long
     Dim wsLook As Worksheet, lookRow As Long
     Dim row As Long, done As Long, blank As Long, skipped As Long
     Dim i As Long
@@ -1907,6 +1908,11 @@ Public Sub CrownVervePaymentDue()
         recordId = parts(0)
         policyNo = Trim$(CStr(parts(2)))
 
+        ' "GAF 20035367" with a space is how the run of 12 Oct stuck: Verve's
+        ' lookup did not open it, and the eight after it failed too. Verve
+        ' itself never writes a space in a policy number.
+        policyNo = Replace(Replace(policyNo, " ", ""), Chr$(160), "")
+
         If Len(policyNo) = 0 Then GoTo NextVerve
 
         ' Not a policy number, so it is not looked up. Written down rather
@@ -1961,6 +1967,19 @@ Public Sub CrownVervePaymentDue()
             ' figures, which is exactly what happened on United.
             note = "Verve did not open this policy - nothing written"
             missed = missed + 1
+
+            ' What was on screen instead, for the first few - the last run
+            ' stopped on eight of these and there was nothing to look at.
+            If notOpened < 3 Then
+                If CrownLookSheet(wsLook, lookRow) Then
+                    wsLook.Cells(lookRow, 1).value = recordId
+                    wsLook.Cells(lookRow, 2).value = policyNo
+                    wsLook.Cells(lookRow, 3).value = "DID NOT OPEN - this is what was on screen instead" _
+                        & vbCrLf & CrownVerveLook(drv)
+                    lookRow = lookRow + 1
+                    notOpened = notOpened + 1
+                End If
+            End If
 
             ' A few in a row is not bad luck, it is a stuck page. Go back to
             ' the start and see whether the lookup comes back; if it does
