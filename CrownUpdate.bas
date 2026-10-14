@@ -107,7 +107,9 @@ Public Sub CrownInstallUpdate()
                 ' Renamed before removing: Excel only really removes a module
                 ' when the macro ends, and the new one would otherwise
                 ' arrive as "name1".
-                comp.Name = name & "_old" & Format$(Now, "nnss")
+                ' Kept short: a module name may be at most 31 characters, and
+                ' "Mod12uaigScrapeQuotePayment_old1234" was 35 - error 50132.
+                comp.Name = "zOld" & Format$(Now, "hhnnss") & done
                 project.VBComponents.Remove comp
             End If
 
@@ -129,7 +131,7 @@ Public Sub CrownInstallUpdate()
 
         If Not comp Is Nothing Then
             comp.Export backup & CStr(retired(i)) & ".bas"
-            comp.Name = CStr(retired(i)) & "_old" & Format$(Now, "nnss")
+            comp.Name = "zGone" & Format$(Now, "hhnnss") & i
             project.VBComponents.Remove comp
             removed = removed + 1
             report = report & "   " & CStr(retired(i)) & " (old leftover, taken out)" & vbCrLf
