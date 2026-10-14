@@ -159,7 +159,11 @@ function doPost(e) {
     // A customer who is not on the sheet yet - a request straight off the
     // website. Their row is added at the bottom under YOUR headings (none
     // are renamed or added), then the quote is filled in like any other.
-    if (!row) {
+    if (row) {
+      // Already on the sheet: fill in any of its EMPTY cells we have an
+      // answer for (a vehicle, a second driver). Nothing typed is changed.
+      fillBlanks(sheet, row, headings, body);
+    } else {
       row = addRow(sheet, headings, body);
       added = true;
 
@@ -259,6 +263,7 @@ var NEW_ROW_FROM = {
   drivers_license:      'Drivers License Number',
   drivers_license_number: 'Drivers License Number',
   license_state:        'DL_state',
+  drivers_license_state: 'DL_state',
   industry:             'Industry_',
   job_title:            'JOB_TITLE_',
   previous_insurance:   'Previous insurance'
@@ -273,7 +278,9 @@ function flat(text) {
 function aliasFor(aliases, want) {
   if (aliases[want]) { return aliases[want]; }
   for (var a in aliases) {
-    if (aliases.hasOwnProperty(a) && a.length >= 8 && want.indexOf(a) === 0) { return aliases[a]; }
+    // Only for a heading cut short on the sheet, like "how_did_you_he...".
+    // A wider rule let drivers_license_state take the licence NUMBER.
+    if (aliases.hasOwnProperty(a) && a === 'howdidyouhear' && want.indexOf(a) === 0) { return aliases[a]; }
   }
   return '';
 }
@@ -287,6 +294,114 @@ function aliasFor(aliases, want) {
  * A heading nothing matches is left empty. Nothing is ever renamed.
  */
 function addRow(sheet, headings, body) {
+  var line = rowValues(headings, body);
+
+  if (!line) { return 0; }
+
+  sheet.appendRow(line);
+
+  return sheet.getLastRow();
+}
+
+
+/** Fill the empty cells of an existing row - never one that has something in it. */
+function fillBlanks(sheet, row, headings, body) {
+  var line = rowValues(headings, body);
+  if (!line) { return 0; }
+
+  var range = sheet.getRange(row, 1, 1, headings.length);
+  var have = range.getValues()[0];
+  var filled = 0;
+
+  for (var c = 0; c < headings.length; c++) {
+    if ((have[c] === '' || have[c] === null) && line[c] !== '' && flat(headings[c]) !== 'savedat') {
+      have[c] = line[c];
+      filled++;
+    }
+  }
+
+  if (filled) { range.setValues([have]); }
+
+  return filled;
+}
+
+
+/**
+ * The numbered questions. The website calls vehicle 1's year just "Year"
+ * and vehicle 2's "Year_2nd", so "vehicle_2_year" can never match by its
+ * words alone. Each entry: a word looked for in your heading, then the
+ * website question for number 1, 2, 3, 4. Checked top to bottom, so
+ * "purchase" is tried before "year".
+ */
+var VEHICLE_QUESTIONS = [
+  ['purchase', ['Purchase_Year', 'Purchase year veh 2', 'Purchase year veh 3', 'Purchase year veh 4']],
+  ['year',     ['Year', 'Year_2nd', 'Year_3rd', 'Year_4th']],
+  ['make',     ['Make', 'Make_2nd', 'Make_3rd', 'Make_4th']],
+  ['model',    ['Model', 'Model_2nd', 'Model_3rd', 'Model_4th']],
+  ['vin',      ['Vin_Number', 'Vin_Number_2nd', 'Vin_Number_3rd', 'Vin_Number_4th']],
+  ['trim',     ['Trim_veh_1', 'Trim_veh_2', 'Trim_veh_3', 'Trim_veh_4']],
+  ['milesdrive', ['How_many_miles_do_you_drive_', 'How_many_miles_do_you_drive__veh_2_each_year',
+                  'How_many_miles_do_you_drive_veh_3_each_year', 'How_many_miles_do_you_drive_veh_4_each_year']],
+  ['mile',     ['Mileage', '', 'Mileage veh 3', 'Mileage veh 4']],
+  ['ride',     ['vehicle 1 ridehsare', 'RIdesharing vehicle 2', 'RIdesharing vehicle 3', 'RIdesharing vehicle 4']],
+  ['comm',     ['vehicle 1 commercial use', 'Vehicle 2 Commercial use', 'Vehicle 3 Commercial use', 'Vehicle 4 Commercial']],
+  ['deduct',   ['Vehicle 1 Deductibles', 'Vehicle 2 Deductibles', 'Vehicle 3 Deductibles', 'Vehicle 4 Deductibles']],
+  ['type',     ['Vehicle_type_', 'Vehicle 2 type', 'Vehicle 3 type', 'Vehicle 4 type']],
+  ['value',    ['Vehicle_Value_', 'Vehicle 2 Value', 'Vehicle 3 Value', 'Vehicle 4 Value']],
+  ['owned',    ['How_long_vehicle_owned_', '', '', '']],
+  ['new',      ['New Purchase', '', '', '']]
+];
+
+var DRIVER_QUESTIONS = [
+  ['first',    ['First Name', 'Driver 2 First', 'Driver 3 First', 'Driver 4 First']],
+  ['middle',   ['Middle name', '', '', '']],
+  ['last',     ['Last Name', 'Driver 2 Last', 'Driver 3 Last', 'Driver 4 Last']],
+  ['dob',      ['Date of Birth', 'Driver 2 dob', 'Driver 3 dob', 'Driver 4 dob']],
+  ['birth',    ['Date of Birth', 'Driver 2 dob', 'Driver 3 dob', 'Driver 4 dob']],
+  ['gender',   ['Gender', 'driver 2 Gender', 'driver 3 Gender', 'driver 4 Gender']],
+  ['marital',  ['Marital Status', 'Driver 2 Marital Status', 'Driver 3 Marital Status', 'Driver 4 Marital Status']],
+  ['state',    ['DL_state', 'DL_state_Drv 2', 'DL_state_Drv 3_copy', 'DL_state_Drv 4_copy_copy']],
+  ['licen',    ['Drivers License Number', 'Driver 2 DL', 'Driver 3 DL', 'Driver 4 DL']],
+  ['dl',       ['Drivers License Number', 'Driver 2 DL', 'Driver 3 DL', 'Driver 4 DL']],
+  ['industry', ['Industry_', 'Driver 2 industry', 'Driver 3 industry', 'Driver 4 industry']],
+  ['occupa',   ['JOB_TITLE_', 'Driver 2 JOB TITLE', 'Driver  3 JOB TITLE', 'Driver 4 JOB TITLE']],
+  ['job',      ['JOB_TITLE_', 'Driver 2 JOB TITLE', 'Driver  3 JOB TITLE', 'Driver 4 JOB TITLE']],
+  ['relation', ['', 'Driver_2_relation', 'Driver_3_relation', 'Driver_4_relation_copy']],
+  ['exclu',    ['', 'Exclude', 'Exclude  driver 3', 'Exclude  driver 4']],
+  ['riding',   ['Years_riding_experience', 'Years riding experience driver 2',
+                'Years riding experience driver 3', 'Years riding experience driver 4']]
+];
+
+/** "vehicle_2_year" -> the answer to "Year_2nd", or undefined. */
+function numbered(want, byFlat) {
+  var m = /^(vehicle|veh|car|driver|drv)([1-4])(.*)$/.exec(want);
+  if (!m) { return undefined; }
+
+  var list = (m[1] === 'driver' || m[1] === 'drv') ? DRIVER_QUESTIONS : VEHICLE_QUESTIONS;
+  var n = parseInt(m[2], 10) - 1;
+  var rest = m[3];
+
+  for (var i = 0; i < list.length; i++) {
+    if (rest.indexOf(list[i][0]) >= 0) {
+      var q = list[i][1][n];
+      if (!q) { return undefined; }
+      return byFlat[flat(q)];
+    }
+  }
+
+  return undefined;
+}
+
+
+/**
+ * One row's worth of values, in the order of your headings.
+ *
+ * Every heading is looked up in what the website sent: the list above,
+ * then the same words, then the numbered vehicle/driver questions, then -
+ * for a heading that was cut short - the one question whose name starts
+ * with it. A heading nothing matches is left empty. Nothing is renamed.
+ */
+function rowValues(headings, body) {
   var fields = body.fields || {};
   var byFlat = {};
 
@@ -294,7 +409,7 @@ function addRow(sheet, headings, body) {
     if (fields.hasOwnProperty(name)) { byFlat[flat(name)] = fields[name]; }
   }
 
-  if (!body.email && !Object.keys(byFlat).length) { return 0; }
+  if (!body.email && !Object.keys(byFlat).length) { return null; }
 
   var aliases = {};
   for (var h in NEW_ROW_FROM) {
@@ -306,6 +421,7 @@ function addRow(sheet, headings, body) {
   for (var c = 0; c < headings.length; c++) {
     var want = flat(headings[c]);
     var value = '';
+    var num;
 
     if (!want) {
       value = '';
@@ -315,6 +431,8 @@ function addRow(sheet, headings, body) {
       value = byFlat[aliasFor(aliases, want)];
     } else if (byFlat[want] !== undefined) {
       value = byFlat[want];
+    } else if ((num = numbered(want, byFlat)) !== undefined) {
+      value = num;
     } else if (want.length >= 5) {
       // A heading cut short: the one question that starts with it.
       var hits = Object.keys(byFlat).filter(function (k) { return k.indexOf(want) === 0; });
@@ -328,9 +446,7 @@ function addRow(sheet, headings, body) {
     line.push(value);
   }
 
-  sheet.appendRow(line);
-
-  return sheet.getLastRow();
+  return line;
 }
 
 

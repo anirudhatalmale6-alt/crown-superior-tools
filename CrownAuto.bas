@@ -10,7 +10,7 @@ Option Explicit
 ' pressing CrownRunQuotes - which is why switching rating on and setting
 ' the hours never quoted anything by itself.
 '
-' CrownStartAutoQuoting starts a timer. Every 15 minutes it asks the
+' CrownStartAutoQuoting starts a timer. Every 5 minutes it asks the
 ' website whether anything is waiting and whether now is inside the
 ' hours; if both, it runs CrownRunQuotes with no boxes and writes every
 ' line on RunLog. CrownStopAutoQuoting stops it.
@@ -21,7 +21,7 @@ Option Explicit
 ' =====================================================================
 
 ' How often it looks.
-Private Const AUTO_EVERY_MINUTES As Long = 15
+Private Const AUTO_EVERY_MINUTES As Long = 5
 
 Private CrownAutoNextRun As Date
 Public CrownAutoOn As Boolean
@@ -38,7 +38,7 @@ Public Sub CrownStartAutoQuoting()
     CrownAutoOn = True
     CrownAutoNote "automatic quoting started - looking every " & AUTO_EVERY_MINUTES & " minutes"
 
-    ' The first look straight away (in 10 seconds), not in 15 minutes.
+    ' The first look straight away (in 10 seconds), not in 5 minutes.
     CrownAutoSchedule 0
 
     MsgBox "Automatic quoting is ON." & vbCrLf & vbCrLf & _
