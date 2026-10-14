@@ -65,6 +65,17 @@ Public Sub CrownStopAutoQuoting()
 End Sub
 
 
+' Stop the timer without a box - CrownInstallUpdate calls this before it
+' replaces this module.
+Public Sub CrownAutoQuietStop()
+    CrownAutoOn = False
+
+    On Error Resume Next
+    Application.OnTime CrownAutoNextRun, "CrownAutoTick", , False
+    On Error GoTo 0
+End Sub
+
+
 ' What the timer runs. Public only because Excel's timer can only call a
 ' public macro - it is not meant to be run by hand.
 Public Sub CrownAutoTick()
