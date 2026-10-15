@@ -350,6 +350,38 @@ Private Function CrownCardJs() As String
 End Function
 
 
+' ---------------------------------------------------------------------
+' Previous insurance company (the first United page)
+'
+' His macro picks the company only when the customer's answer is spelled
+' exactly like United's list; anything else leaves it unpicked and United
+' says "Please select previous company name". Tony: "it can select other
+' non standard". So: the same name if it is there (or close), otherwise
+' Other Non Standard.
+' ---------------------------------------------------------------------
+Public Sub CrownUnitedPriorCompany(ByVal drv As Object, ByVal company As String)
+    Dim answer As String
+
+    answer = CrownUnitedJs(drv, _
+        "function f(s){return (s||'').replace(/[^a-z0-9]+/gi,' ').trim().toLowerCase();}" & _
+        "var s=document.getElementById('txtPrevCompName');if(!s)return 'no company list';" & _
+        "var w=f(arguments[0]),pick=-1,how='';" & _
+        "for(var i=0;i<s.options.length&&pick<0;i++){if(w&&f(s.options[i].text)===w){pick=i;how='same name';}}" & _
+        "for(var i=0;i<s.options.length&&pick<0;i++){var t=f(s.options[i].text);" & _
+        "if(w.length>=4&&t.length>=4&&(t.indexOf(w)>=0||w.indexOf(t)>=0)){pick=i;how='close match';}}" & _
+        "var tries=[/other.*non.?standard/i,/non.?standard/i,/^other/i];" & _
+        "for(var k=0;k<tries.length&&pick<0;k++){for(var i=0;i<s.options.length;i++){" & _
+        "if(tries[k].test(s.options[i].text)){pick=i;how='not on the list - Other';break;}}}" & _
+        "if(pick<0)return 'nothing to pick for '+arguments[0];" & _
+        "s.selectedIndex=pick;setTimeout(function(){s.dispatchEvent(new Event('change',{bubbles:true}));},50);" & _
+        "return 'chose '+s.options[pick].text.trim()+' ('+how+')';", _
+        IIf(Len(Trim$(company)) = 0, " ", company))
+
+    drv.Wait 800
+    CrownNoteBlocker "United previous company '" & company & "': " & answer
+End Sub
+
+
 ' Run a script and hand back its answer as text; an open alert or a page
 ' mid-load comes back as "wait" rather than as an error.
 Private Function CrownUnitedJs(ByVal drv As Object, ByVal script As String, _

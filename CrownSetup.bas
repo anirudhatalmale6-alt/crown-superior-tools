@@ -100,7 +100,8 @@ Private Function CrownSetupIsForwarder(ByVal project As Object) As Boolean
     Dim comp As Object
 
     On Error Resume Next
-    Set comp = project.VBComponents("CrownUpdate")
+    Set comp = project.VBComponents("CrownUpdater")
+    If comp Is Nothing Then Set comp = project.VBComponents("CrownUpdate")
     If comp Is Nothing Then Exit Function
 
     CrownSetupIsForwarder = (InStr(1, comp.CodeModule.Lines(1, comp.CodeModule.CountOfLines), _
@@ -163,7 +164,8 @@ Public Sub CrownSetupUpdate()
 
         If StrComp(name, "CrownSetup", vbTextCompare) = 0 Then
             ' Itself: a running macro cannot rewrite its own module.
-        ElseIf StrComp(name, "CrownUpdate", vbTextCompare) = 0 And CrownSetupIsForwarder(project) Then
+        ElseIf (StrComp(name, "CrownUpdate", vbTextCompare) = 0 Or StrComp(name, "CrownUpdater", vbTextCompare) = 0) _
+               And CrownSetupIsForwarder(project) Then
             ' Already just the forwarder - and this may be running from it.
         ElseIf Len(inFile) = 0 Then
             problems = problems & "   " & file & " is not a module - skipped" & vbCrLf

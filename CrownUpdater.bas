@@ -1,4 +1,4 @@
-Attribute VB_Name = "CrownUpdate"
+Attribute VB_Name = "CrownUpdater"
 Option Explicit
 
 ' =====================================================================

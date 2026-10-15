@@ -356,7 +356,9 @@ Public Function CrownQuoteFail(ByVal submissionId As Long, ByVal reason As Strin
                    & "&reason=" & CrownEnc(Left$(reason, 150)))
 End Function
 
-Public Function CrownUpdate(ByVal formId As Long, ByVal recordId As Long, _
+' Named CrownApiUpdate, not CrownUpdate: a function and a module with the
+' same name confuse Excel ("Expected variable or procedure, not module").
+Public Function CrownApiUpdate(ByVal formId As Long, ByVal recordId As Long, _
                             ByRef names As Variant, ByRef values As Variant) As String
     Dim body As String
 
@@ -365,7 +367,7 @@ Public Function CrownUpdate(ByVal formId As Long, ByVal recordId As Long, _
          & "&id=" & recordId _
          & "&values=" & CrownEnc(CrownJson(names, values))
 
-    CrownUpdate = CrownPost(body)
+    CrownApiUpdate = CrownPost(body)
 End Function
 
 ' Put a brand new quote in. Same two arrays. The reply carries the new id.
@@ -593,7 +595,7 @@ Public Sub CrownWriteQuoteBack()
     names = Array("Insurance_Co_Name", "Policy_No", "Amount ")
     values = Array(company, policyNo, amount)
 
-    answer = CrownUpdate(CROWN_FORM_QUOTE, CLng(id), names, values)
+    answer = CrownApiUpdate(CROWN_FORM_QUOTE, CLng(id), names, values)
 
     If InStr(1, answer, """ok"":true", vbTextCompare) > 0 Then
         MsgBox "Written onto quote " & id & " on the website.", vbInformation, "Crown Superior"

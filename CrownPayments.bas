@@ -383,7 +383,7 @@ Public Sub CrownUploadPaymentsDue()
                                "Yes", _
                                Format$(Now, "mm-dd-yyyy hh:mm AM/PM"))
 
-                answer = CrownUpdate(CROWN_FORM_POLICY, CLng(recordId), names, values)
+                answer = CrownApiUpdate(CROWN_FORM_POLICY, CLng(recordId), names, values)
 
                 If InStr(1, answer, """ok"":true", vbTextCompare) > 0 Then
                     wsLog.Cells(logRow, 11).value = "Written to record " & recordId
@@ -1131,7 +1131,7 @@ ReadThePolicy:
             ws.Cells(row, 11).value = Trim$("nothing found - left alone. " & note)
             blank = blank + 1
         Else
-            answer = CrownUpdate(CROWN_FORM_POLICY, CLng(recordId), _
+            answer = CrownApiUpdate(CROWN_FORM_POLICY, CLng(recordId), _
                 Array("Web_pymnt_due", "updated_due_date", "updated_cancel_date", _
                       "Status_", "Update_due_dates", "Last_Updated", "Current_policy_no"), _
                 Array(dueAmount, CrownDate(dueDate), CrownDate(cancelDate), _
@@ -2168,7 +2168,7 @@ VerveWrite:
                 values = CrownWith(values, policyStatus)
             End If
 
-            answer = CrownUpdate(CROWN_FORM_POLICY, CLng(recordId), names, values)
+            answer = CrownApiUpdate(CROWN_FORM_POLICY, CLng(recordId), names, values)
 
             If InStr(1, answer, """ok"":true", vbTextCompare) > 0 Then
                 ws.Cells(row, 8).value = Trim$("written. " & note)

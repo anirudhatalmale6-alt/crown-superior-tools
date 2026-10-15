@@ -508,6 +508,10 @@ End Sub
 Private Sub CrownVerveBilling(ByVal drv As ChromeDriver)
     Dim blank As Variant
 
+    ' Sometimes Verve leaves the Pay Plan empty and Next answers
+    ' "(R-833) Please select a Pay Plan." - pick ours.
+    CrownVervePickPayPlan drv
+
     On Error Resume Next
     blank = drv.ExecuteScript( _
         "var t=document.querySelectorAll('input[id$=""_I""]'),n=0;" & _
@@ -519,6 +523,52 @@ Private Sub CrownVerveBilling(ByVal drv As ChromeDriver)
     If CLng(Val(CStr(blank))) > 0 Then
         CrownNotePage drv, "Verve: the Billing page had " & blank & " empty box(es)"
     End If
+End Sub
+
+
+' The Pay Plan list on the billing page, when it is empty: open it the way
+' FillVerve opens Verve's lists (click the box), then click the row for
+' VERVE_PLAN - or, if that exact wording is not there, the 16.67% one.
+Private Sub CrownVervePickPayPlan(ByVal drv As ChromeDriver)
+    Dim box As String, row As String, now_ As String
+
+    On Error Resume Next
+    box = CStr(drv.ExecuteScript( _
+        "var t=document.querySelectorAll('input[id$=""_I""]');" & _
+        "for(var i=0;i<t.length;i++){var e=t[i];if(!/pay_?plan/i.test(e.id))continue;" & _
+        "if(!e.getClientRects().length)continue;" & _
+        "var v=(e.value||'').trim();if(v&&!/^(select|-+|none)$/i.test(v))return '';" & _
+        "return e.id;}return '';"))
+    If Err.Number <> 0 Then box = ""
+    Err.Clear
+
+    If Len(box) = 0 Then
+        On Error GoTo 0
+
+        Exit Sub
+    End If
+
+    drv.FindElementById(box).Click
+    drv.Wait 700
+
+    row = CStr(drv.ExecuteScript( _
+        "function f(s){return (s||'').replace(/\s+/g,' ').trim().toLowerCase();}" & _
+        "var list=document.getElementById(arguments[0].replace(/_I$/,'_DDD_L_LBT'));" & _
+        "if(!list)return 'no list';var want=f(arguments[1]),best=null;" & _
+        "var r=list.querySelectorAll('tr');" & _
+        "for(var i=0;i<r.length;i++){var t=f(r[i].innerText);" & _
+        "if(t===want){best=r[i];break;}if(!best&&t.indexOf('16.67')>=0)best=r[i];}" & _
+        "if(!best)return 'no 16.67 plan';" & _
+        "var c=best.querySelector('td')||best;c.click();return 'ok '+f(best.innerText);", box, VERVE_PLAN))
+    If Err.Number <> 0 Then row = "error: " & Err.Description
+    Err.Clear
+
+    drv.Wait 800
+    now_ = CStr(drv.FindElementById(box).Value)
+    Err.Clear
+    On Error GoTo 0
+
+    CrownNoteBlocker "Verve billing: the Pay Plan was empty - " & row & " (box now: " & now_ & ")"
 End Sub
 
 
