@@ -343,6 +343,19 @@ Public Function CrownQuoteResult(ByVal submissionId As Long, _
     CrownQuoteResult = CrownPost(body)
 End Function
 
+' Tell the website this request could not be quoted this time.
+'
+' Without it a customer the tool cannot finish stays on the waiting list
+' and is tried again every five minutes, for ever - United and Verve see
+' the same customer over and over. The website counts these and, after
+' its limit (two), takes the request off the tool's list and marks it
+' "left to you" with this reason, where it can be put back with a click.
+Public Function CrownQuoteFail(ByVal submissionId As Long, ByVal reason As String) As String
+    CrownQuoteFail = CrownPost(CrownBody("quotefail") _
+                   & "&id=" & submissionId _
+                   & "&reason=" & CrownEnc(Left$(reason, 150)))
+End Function
+
 Public Function CrownUpdate(ByVal formId As Long, ByVal recordId As Long, _
                             ByRef names As Variant, ByRef values As Variant) As String
     Dim body As String

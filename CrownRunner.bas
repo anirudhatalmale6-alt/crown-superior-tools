@@ -72,6 +72,9 @@ Public Sub CrownRunQuotes()
     Dim stopped As Long
     Dim loaded As Boolean
     Dim vDid As Long, vFailed As Long
+    Dim carriers As Collection
+    Dim doUnited As Boolean, doVerve As Boolean
+    Dim priced As Boolean, vNote As String, gaveUp As Long
 
     json = CrownQuoteWork(RUN_MOST)
 
@@ -118,7 +121,8 @@ Public Sub CrownRunQuotes()
 
     Set ids = New Collection
     Set names = New Collection
-    CrownReadWorkList json, ids, names
+    Set carriers = New Collection
+    CrownReadWorkList json, ids, names, carriers
 
     If ids.Count = 0 Then
         If Not CrownAutoMode Then MsgBox "Nothing is waiting to be quoted.", vbInformation, "Crown Superior"
@@ -173,10 +177,20 @@ Public Sub CrownRunQuotes()
         ws.Cells(row, 2).value = ids(i)
         ws.Cells(row, 3).value = who
 
+        ' The tick boxes on the website card: both unless he unticked one.
+        doUnited = (InStr(1, CStr(carriers(i)), "united", vbTextCompare) > 0)
+        doVerve = (InStr(1, CStr(carriers(i)), "verve", vbTextCompare) > 0)
+        priced = False
+        vNote = ""
+        CrownLastStopReason = ""
+        CrownLastAlert = ""
+
         loaded = CrownLoadQuoteById(CLng(ids(i)), who)
 
         If Not loaded Then
             note = "could not find that quote in the tool - run CrownFetchNewQuotes first"
+        ElseIf Not doUnited Then
+            note = "United unticked on the website - Verve only"
         Else
             before = CrownQuotePayRows()
 
@@ -235,13 +249,14 @@ Public Sub CrownRunQuotes()
             If InStr(1, answer, """ok"":true", vbTextCompare) > 0 Then
                 did = did + 1
                 inARow = 0
+                priced = True
                 note = Trim$(note & " sent: down " & down & ", monthly " & monthly)
             Else
                 failed = failed + 1
                 inARow = inARow + 1
                 note = Trim$(note & " the website refused it: " & Left$(answer, 90))
             End If
-        ElseIf Len(CrownLastStopReason) = 0 Then
+        ElseIf Len(CrownLastStopReason) = 0 And doUnited Then
             failed = failed + 1
             inARow = inARow + 1
         End If
@@ -253,15 +268,47 @@ Public Sub CrownRunQuotes()
 
         ' Then Verve for the same customer - whatever United did. If United
         ' would not quote (the weather notice) this is the price they get.
-        If loaded Then
+        If loaded And doVerve Then
             If CrownRunVerve(ws, row, CLng(ids(i)), who) Then
                 vDid = vDid + 1
                 inARow = 0
+                priced = True
             Else
                 vFailed = vFailed + 1
+                vNote = CStr(ws.Cells(row, 6).value)
             End If
 
             row = row + 1
+        End If
+
+        ' Nothing reached the website for this customer. Left alone it
+        ' stays on the waiting list and is tried again in five minutes,
+        ' and again, for ever - United and Verve see the same customer
+        ' over and over. So the website is told; after two tries it takes
+        ' the request off the list and shows it as "left to you" with
+        ' this reason. (United's weather notice is not a failure - that
+        ' already went to the website as the quote's note.)
+        If Not priced And Len(CrownLastStopReason) = 0 Then
+            Dim why As String, told2 As String
+
+            why = ""
+            If doUnited Then why = "United: " & Left$(note, 70)
+            If doVerve And Len(vNote) > 0 Then
+                why = why & IIf(Len(why) > 0, " / ", "") & Left$(vNote, 70)
+            End If
+            If Not loaded Then why = "could not find that quote in the tool"
+
+            told2 = CrownQuoteFail(CLng(ids(i)), why)
+
+            If InStr(1, told2, """skipped"":true", vbTextCompare) > 0 Then
+                gaveUp = gaveUp + 1
+                ws.Cells(row, 1).value = Now
+                ws.Cells(row, 2).value = ids(i)
+                ws.Cells(row, 3).value = who
+                ws.Cells(row, 6).value = "tried twice with no price - taken off the list, " & _
+                                         "shown as Left to you on the website"
+                row = row + 1
+            End If
         End If
 
         DoEvents
@@ -289,7 +336,9 @@ Finished:
            IIf(vFailed > 0, vFailed & " got no Verve price - the RunLog says why." & vbCrLf, "") & _
            IIf(stopped > 0, stopped & " United would not quote today - its reason was sent " & _
                "to the website." & vbCrLf, "") & _
-           failed & " came back with nothing and were left for you." & vbCrLf & vbCrLf & _
+           failed & " came back with nothing and were left for you." & vbCrLf & _
+           IIf(gaveUp > 0, gaveUp & " had now failed twice and were taken off the list - " & _
+               "on the website they show as Left to you." & vbCrLf, "") & vbCrLf & _
            IIf(inARow >= RUN_STOP_AFTER, _
                "It stopped early because " & inARow & " in a row came back with nothing - " & _
                "worth checking you are still signed in to United." & vbCrLf & vbCrLf, "") & _
@@ -370,9 +419,11 @@ End Function
 ' number, and "name": followed by text. Anything it cannot read is
 ' skipped rather than guessed at.
 Public Sub CrownReadWorkList(ByVal json As String, ByRef ids As Collection, _
-                             ByRef names As Collection)
+                             ByRef names As Collection, _
+                             Optional ByVal carriers As Collection)
     Dim at As Long, stop_ As Long
     Dim number As String, who As String
+    Dim which As String
 
     at = InStr(1, json, """items""", vbTextCompare)
     If at = 0 Then Exit Sub
@@ -399,8 +450,25 @@ Public Sub CrownReadWorkList(ByVal json As String, ByRef ids As Collection, _
 
         ids.Add CLng(number)
         names.Add IIf(Len(who) = 0, "request " & number, who)
+
+        ' Which carriers he left ticked for this one. Read up to the next
+        ' item only, so one customer's choice is never read as the next's.
+        ' Missing means an older website: both, as before.
+        If Not carriers Is Nothing Then
+            which = CrownJsonText(Left$(json, CrownItemEnd(json, at)), at, "carriers")
+            carriers.Add IIf(Len(which) = 0, "united,verve", which)
+        End If
     Loop
 End Sub
+
+
+' Where the item that starts at "at" ends: the next "id": or the end.
+Private Function CrownItemEnd(ByVal json As String, ByVal at As Long) As Long
+    Dim nxt As Long
+
+    nxt = InStr(at + 1, json, """id"":", vbTextCompare)
+    CrownItemEnd = IIf(nxt = 0, Len(json), nxt - 1)
+End Function
 
 
 ' The text of one field, looked for after a given point.

@@ -255,6 +255,83 @@ Private Function CrownVerveReadPlan(ByVal drv As ChromeDriver, ByRef down As Str
 End Function
 
 
+' ---------------------------------------------------------- first page
+
+' Verve's first page (name, zip, email, phone) - wait until it has gone,
+' clearing whatever stands in the way.
+'
+' FillVerve pressed Continue, looked ONCE for the "existing client"
+' pop-up, then waited for the page (QACMainDiv) to go. When that pop-up
+' came a moment later than the one look, nothing pressed New Client and
+' the page never moved: "QACMainDiv not found". This keeps looking for as
+' long as it waits.
+'
+' False, with the reason in CrownLastAlert and the page on QuoteLook,
+' when Verve shows an error or the page is still there after 90 seconds.
+Public Function CrownVervePastFirstPage(ByVal drv As Object) As Boolean
+    Dim started As Date
+    Dim answer As String
+    Dim clicks As Long
+
+    started = Now
+
+    Do
+        On Error Resume Next
+        answer = ""
+        answer = drv.ExecuteScript( _
+            "if(!document.getElementById('QACMainDiv'))return 'gone';" & _
+            "var b=document.querySelectorAll('[id$=""NewClientButton_CD""],[id$=""NewClientButton""]');" & _
+            "for(var i=0;i<b.length;i++){if(b[i].getClientRects().length)return 'new:'+b[i].id;}" & _
+            "var e=document.querySelectorAll('.ErrorMessage'),t=[];" & _
+            "for(var j=0;j<e.length;j++){if(e[j].getClientRects().length){" & _
+            "var s=(e[j].innerText||'').replace(/\s+/g,' ').trim();if(s)t.push(s);}}" & _
+            "if(t.length)return 'error:'+t.join(' | ');" & _
+            "return 'wait';")
+        If Err.Number <> 0 Then answer = "wait"
+        Err.Clear
+        On Error GoTo 0
+
+        If answer = "gone" Then
+            CrownVervePastFirstPage = True
+
+            Exit Function
+        End If
+
+        If Left$(answer, 4) = "new:" Then
+            clicks = clicks + 1
+
+            If clicks > 3 Then
+                CrownNotePage drv, "Verve: pressed New Client 3 times and the first page is still there"
+                CrownLastAlert = "Verve: the existing-client pop-up kept coming back"
+
+                Exit Function
+            End If
+
+            CrownNoteBlocker "Verve: existing-client pop-up - pressed New Client"
+
+            On Error Resume Next
+            drv.FindElementById(Mid$(answer, 5)).Click
+            Err.Clear
+            On Error GoTo 0
+
+            drv.Wait 2500
+        ElseIf Left$(answer, 6) = "error:" Then
+            CrownNotePage drv, "Verve first page: " & Mid$(answer, 7)
+            CrownLastAlert = "Verve: " & Left$(Mid$(answer, 7), 140)
+
+            Exit Function
+        Else
+            drv.Wait 1500
+        End If
+
+        DoEvents
+    Loop While (Now - started) * 86400 < 90
+
+    CrownNotePage drv, "Verve: the first page did not move on after Continue"
+    CrownLastAlert = "Verve: the first page did not move on after Continue - QuoteLook has what was on screen"
+End Function
+
+
 ' ---------------------------------------------------------------- page
 
 ' The words on the page, squashed to one line, for telling pages apart.
