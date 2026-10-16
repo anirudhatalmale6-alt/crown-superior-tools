@@ -58,6 +58,10 @@ Private Const VERVE_RPT_EXPORT As String = "ctl00_P_L_ReportDisplayForm_ReportVi
 ' to be accounted for."
 Private Const CANCELLED_LONG_ENOUGH As Long = 60
 
+' How long a policy Verve showed as long finished is left alone before it
+' is looked at once more - in case it was reinstated.
+Private Const VERVE_REST_DAYS As Long = 30
+
 ' How many policies in a row may fail to open before something is done
 ' about it. Three is comfortably more than a run of genuinely unknown
 ' policy numbers; eight means the site is not answering at all.
@@ -662,6 +666,80 @@ Private Function CrownUaigPickRow(ByVal listText As String, _
 End Function
 
 
+' The workbook's memory of policies Verve showed as long finished:
+' VerveFinished sheet, A policy number, B why, C when it was seen.
+Private Function CrownVerveFinishedList() As Object
+    Dim d As Object, ws As Worksheet, r As Long, last As Long
+
+    Set d = CreateObject("Scripting.Dictionary")
+    d.CompareMode = 1
+
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets("VerveFinished")
+    On Error GoTo 0
+
+    If Not ws Is Nothing Then
+        last = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
+
+        For r = 2 To last
+            If Len(Trim$(CStr(ws.Cells(r, 1).Value))) > 0 Then
+                d(Trim$(CStr(ws.Cells(r, 1).Value))) = Array(CStr(ws.Cells(r, 2).Value), ws.Cells(r, 3).Value)
+            End If
+        Next r
+    End If
+
+    Set CrownVerveFinishedList = d
+End Function
+
+' True when this policy was seen long finished less than VERVE_REST_DAYS ago.
+Private Function CrownVerveRests(ByVal d As Object, ByVal policyNo As String, ByRef why As String) As Boolean
+    Dim item As Variant
+
+    why = ""
+    If d Is Nothing Then Exit Function
+    If Not d.Exists(Trim$(policyNo)) Then Exit Function
+
+    item = d(Trim$(policyNo))
+
+    If Not IsDate(item(1)) Then Exit Function
+    If CDate(item(1)) < Date - VERVE_REST_DAYS Then Exit Function
+
+    why = item(0) & " (seen " & Format$(CDate(item(1)), "m/d/yyyy") & ", looked at again after " & _
+          Format$(CDate(item(1)) + VERVE_REST_DAYS, "m/d/yyyy") & ")"
+    CrownVerveRests = True
+End Function
+
+' Write it down (or refresh the date if it is already there).
+Private Sub CrownVerveRemember(ByVal policyNo As String, ByVal why As String)
+    Dim ws As Worksheet, r As Long, last As Long
+
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets("VerveFinished")
+    On Error GoTo 0
+
+    If ws Is Nothing Then
+        Set ws = ThisWorkbook.Worksheets.Add(After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
+        ws.Name = "VerveFinished"
+        ws.Range("A1:C1").Value = Array("Policy number", "Why it is passed over", "Seen on")
+        ws.Columns(1).NumberFormat = "@"
+        ws.Columns(2).ColumnWidth = 80
+    End If
+
+    last = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
+
+    For r = 2 To last
+        If StrComp(Trim$(CStr(ws.Cells(r, 1).Value)), Trim$(policyNo), vbTextCompare) = 0 Then Exit For
+    Next r
+
+    If r > last Then r = last + 1
+    If r < 2 Then r = 2
+
+    ws.Cells(r, 1).Value = Trim$(policyNo)
+    ws.Cells(r, 2).Value = why
+    ws.Cells(r, 3).Value = Date
+End Sub
+
+
 ' A policy we can stop asking about.
 '
 '   "Policies that have been cancelled for 60 days do not have to be
@@ -682,7 +760,8 @@ Private Function CrownLongCancelled(ByRef parts As Variant, ByRef since As Strin
     words = CStr(parts(6)) & " " & CStr(parts(7))
 
     If InStr(1, words, "cancel", vbTextCompare) = 0 _
-       And InStr(1, words, "laps", vbTextCompare) = 0 Then
+       And InStr(1, words, "laps", vbTextCompare) = 0 _
+       And InStr(1, words, "cx", vbTextCompare) = 0 Then
         Exit Function
     End If
 
@@ -1858,6 +1937,7 @@ Public Sub CrownVervePaymentDue()
     Dim look As Long, looked As Long
     Dim pageWords As String, quiet As Long
     Dim notOpened As Long
+    Dim finished As Object, finishedWhy As String, rested As Long
     Dim wsLook As Worksheet, lookRow As Long
     Dim row As Long, done As Long, blank As Long, skipped As Long
     Dim i As Long
@@ -1883,6 +1963,9 @@ Public Sub CrownVervePaymentDue()
     ws.Range("A1:H1").value = Array("Record number", "Policy number", "Amount due", "Due date", _
                                     "Cancel date", "Policy status", "When", "What happened")
     row = 2
+
+    ' Policies Verve showed as long finished on an earlier run.
+    Set finished = CrownVerveFinishedList()
 
     Set clsDrv = New Chrm
     Set clsDrv.ChrmDriver = New ChromeDriver
@@ -1954,6 +2037,17 @@ Public Sub CrownVervePaymentDue()
             ws.Cells(row, 2).value = policyNo
             ws.Cells(row, 8).value = "skipped - cancelled since " & cancelledOn
             skipped = skipped + 1
+            row = row + 1
+            GoTo NextVerve
+        End If
+
+        ' Verve itself showed this one as long finished on an earlier run -
+        ' not looked up again until a month has gone by.
+        If CrownVerveRests(finished, policyNo, finishedWhy) Then
+            ws.Cells(row, 1).value = recordId
+            ws.Cells(row, 2).value = policyNo
+            ws.Cells(row, 8).value = "skipped - " & finishedWhy
+            rested = rested + 1
             row = row + 1
             GoTo NextVerve
         End If
@@ -2222,6 +2316,16 @@ VerveWrite:
             End If
         End If
 
+        ' Long finished at Verve: cancelled more than 60 days ago, or
+        ' nothing scheduled at all. Remembered so the next runs pass it by.
+        If Len(cancelDate) > 0 Then
+            If CrownUsDate(cancelDate) > 0 And CrownUsDate(cancelDate) < CDbl(Date) - CANCELLED_LONG_ENOUGH Then
+                CrownVerveRemember policyNo, "Verve showed it cancelled on " & cancelDate
+            End If
+        ElseIf InStr(1, note, "nothing scheduled at Verve", vbTextCompare) > 0 Then
+            CrownVerveRemember policyNo, "Verve showed nothing scheduled (Next Activity NONE, Future Premium $0.00)"
+        End If
+
         row = row + 1
 
 NextVerve:
@@ -2235,6 +2339,7 @@ NextVerve:
            badNumber & " had something in the policy number box that is not a policy number." & vbCrLf & _
            done & " written back to the website." & vbCrLf & _
            blank & " had nothing to read and were left as they were." & vbCrLf & _
+           IIf(rested > 0, rested & " passed over - Verve showed them long finished on an earlier run (they are looked at again after " & VERVE_REST_DAYS & " days)." & vbCrLf, "") & _
            IIf(quiet > 0, quiet & " have nothing scheduled at Verve (Next Activity NONE, " & _
                "Future Premium $0.00) - nothing owed, nothing to read." & vbCrLf, "") & _
            IIf(stopped, vbCrLf & "STOPPED EARLY: Verve stopped answering after " & _
