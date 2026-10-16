@@ -1517,6 +1517,28 @@ Private Function CrownVerveOpenFuture(ByVal drv As ChromeDriver) As String
     CrownVerveOpenFuture = answer
 End Function
 
+' The Future tab, clicked through the tab strip itself: the element whose
+' own words are exactly "Future", then the tab around it (DevExpress draws
+' the tab as a li or td that listens for the mouse, not the link inside).
+Private Function CrownVerveFutureAgain(ByVal drv As ChromeDriver) As String
+    Dim answer As String
+
+    On Error Resume Next
+    answer = drv.ExecuteScript( _
+        "function clean(s){return ((s||'')+'').replace(/\u00a0/g,' ').replace(/\s+/g,' ').trim();}" & _
+        "var all=document.querySelectorAll('a,span,td,li,div');" & _
+        "for(var i=0;i<all.length;i++){var e=all[i];if(clean(e.innerText).toLowerCase()!=='future')continue;" & _
+        "var tab=e.closest('[class*=dxtc-tab],[class*=dxtc],li,td')||e;" & _
+        "['mousedown','mouseup','click'].forEach(function(n){" & _
+        "tab.dispatchEvent(new MouseEvent(n,{bubbles:true,cancelable:true,view:window}));});" & _
+        "return 'clicked '+tab.tagName+(tab.className?' .'+tab.className:'');}" & _
+        "return 'no Future tab';")
+    If Err.Number <> 0 Then answer = "error: " & Err.Description
+    On Error GoTo 0
+
+    CrownVerveFutureAgain = answer
+End Function
+
 ' Tick Combine Installments and Fees, if it is a checkbox we can reach.
 '
 ' Worth doing - it is how he does it by hand - but never relied on. The
@@ -2093,6 +2115,26 @@ Public Sub CrownVervePaymentDue()
                             drv.Wait 900
                             DoEvents
                         Next look
+
+                        ' On some policies the click above lands but the tab
+                        ' never switches - the VerveLook sheet showed the
+                        ' Statement still on screen with the Future lines
+                        ' loaded underneath. Once more, through the tab itself.
+                        If Len(futureRows) = 0 Then
+                            If Left$(CrownVerveFutureAgain(drv), 7) = "clicked" Then
+                                WaitForPopupToDisappear drv, 15000
+                                drv.Wait 900
+
+                                If CrownPageShows(drv, policyNo, 5) Then
+                                    For look = 1 To FUTURE_LOOKS
+                                        futureRows = CrownVerveFutureRows(drv)
+                                        If Len(futureRows) > 0 Then Exit For
+                                        drv.Wait 900
+                                        DoEvents
+                                    Next look
+                                End If
+                            End If
+                        End If
 
                         If CrownVerveNextDue(futureRows, futureDate, futureAmount, futureNote) Then
                             dueAmount = futureAmount

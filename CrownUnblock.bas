@@ -181,7 +181,7 @@ Public Function CrownPickOption(ByVal drv As Object, ByVal id As String, _
         "if(hit<0)return 'no option '+w;" & _
         "s.selectedIndex=hit;" & _
         "setTimeout(function(){s.dispatchEvent(new Event('change',{bubbles:true}));},50);" & _
-        "return 'ok';", id, wanted)
+        "return 'ok';", Array(id, wanted))
     If Err.Number <> 0 Then answer = "error: " & Err.Description
     Err.Clear
     On Error GoTo 0
@@ -190,7 +190,11 @@ Public Function CrownPickOption(ByVal drv As Object, ByVal id As String, _
 
     If CStr(answer) <> "ok" Then CrownNoteBlocker "deductible " & id & " = " & wanted & ": " & CStr(answer)
 
-    CrownPickOption = (CStr(answer) <> "missing")
+    ' True only when it really worked (or the value is simply not in the
+    ' list). Anything else - an error - hands back to his own SelectOption.
+    ' Until 16 Oct this said True on an error too, so a deductible that
+    ' failed here was never picked at all.
+    CrownPickOption = (CStr(answer) = "ok" Or Left$(CStr(answer), 9) = "no option")
 End Function
 
 

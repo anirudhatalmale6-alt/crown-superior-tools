@@ -559,7 +559,7 @@ Private Sub CrownVervePickPayPlan(ByVal drv As ChromeDriver)
         "for(var i=0;i<r.length;i++){var t=f(r[i].innerText);" & _
         "if(t===want){best=r[i];break;}if(!best&&t.indexOf('16.67')>=0)best=r[i];}" & _
         "if(!best)return 'no 16.67 plan';" & _
-        "var c=best.querySelector('td')||best;c.click();return 'ok '+f(best.innerText);", box, VERVE_PLAN))
+        "var c=best.querySelector('td')||best;c.click();return 'ok '+f(best.innerText);", Array(box, VERVE_PLAN)))
     If Err.Number <> 0 Then row = "error: " & Err.Description
     Err.Clear
 

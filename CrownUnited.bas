@@ -187,7 +187,7 @@ Public Function CrownUnitedPremium(ByVal drv As Object) As Boolean
     CrownUnitedPayToday = CrownMoney(total)
 
     ' --- Cash ------------------------------------------------------------
-    cash = CrownUnitedJs(drv, CrownCashJs(), CrownUnitedPayToday)
+    cash = CrownUnitedTypeCash(drv, CrownUnitedPayToday)
 
     If Left$(cash, 2) <> "ok" Then
         CrownNotePage drv, "United payment page: " & cash
@@ -220,7 +220,7 @@ Public Function CrownUnitedPremium(ByVal drv As Object) As Boolean
         cash = CrownUnitedJs(drv, CrownCashReadJs())
         If Abs(Val(cash) - total) < 0.005 Then Exit Do
 
-        CrownUnitedJs drv, CrownCashJs(), CrownUnitedPayToday
+        CrownUnitedTypeCash drv, CrownUnitedPayToday
         drv.Wait 800
         If Not CrownHandleAlert(drv) Then Exit Function
     Loop While (Now - started) * 86400 < 10
@@ -231,6 +231,10 @@ Public Function CrownUnitedPremium(ByVal drv As Object) As Boolean
 
         Exit Function
     End If
+
+    ' Every amount box on the page, hidden ones too - if United still says
+    ' the payment does not match its total, this line shows what it wanted.
+    CrownNoteBlocker "United payment page amounts: " & CrownUnitedJs(drv, CrownAmountsJs())
 
     CrownNoteBlocker "United payment page: 16.67% plan, down " & CrownUnitedDown & _
                      " + previous balance " & CrownUnitedPrevBalance & _
@@ -317,6 +321,7 @@ Private Function CrownCashJs() As String
         "for(var i=0;i<tds.length;i++){if((tds[i].innerText||'').trim().toLowerCase()!=='cash')continue;" & _
         "var tr=tds[i].parentNode;inp=tr.querySelector('input[type=text],input:not([type])');if(inp)break;}" & _
         "if(!inp)return 'no Cash box';" & _
+        "if(inp.id&&arguments[0]==='?id')return 'id:'+inp.id;" & _
         "inp.focus();inp.value=arguments[0];" & _
         "['input','keyup','change'].forEach(function(n){inp.dispatchEvent(new Event(n,{bubbles:true}));});" & _
         "inp.blur();return 'ok '+inp.value;"
@@ -328,6 +333,59 @@ Private Function CrownCashReadJs() As String
         "for(var i=0;i<tds.length;i++){if((tds[i].innerText||'').trim().toLowerCase()!=='cash')continue;" & _
         "var inp=tds[i].parentNode.querySelector('input[type=text],input:not([type])');" & _
         "if(inp)return (inp.value||'').replace(/,/g,'');}return '';"
+End Function
+
+
+' Cash typed the way a person types it - clear, type, Tab out - so every
+' handler United has on that box runs (a value set by script alone can
+' leave United's own running total behind). Script fill only if the box
+' has no id to find it by.
+Private Function CrownUnitedTypeCash(ByVal drv As Object, ByVal amount As String) As String
+    Dim found As String
+    Dim box As Object
+    Dim k As New Selenium.Keys
+
+    found = CrownUnitedJs(drv, CrownCashJs(), "?id")
+
+    If Left$(found, 3) <> "id:" Then
+        CrownUnitedTypeCash = CrownUnitedJs(drv, CrownCashJs(), amount)
+
+        Exit Function
+    End If
+
+    On Error Resume Next
+    Set box = drv.FindElementById(Mid$(found, 4))
+    box.Click
+    box.Clear
+    box.SendKeys k.Control & "a"
+    box.SendKeys amount
+    box.SendKeys k.Tab
+
+    If Err.Number <> 0 Then
+        Err.Clear
+        On Error GoTo 0
+        CrownUnitedTypeCash = CrownUnitedJs(drv, CrownCashJs(), amount)
+
+        Exit Function
+    End If
+    On Error GoTo 0
+
+    drv.Wait 600
+    CrownUnitedTypeCash = "ok " & CrownUnitedJs(drv, CrownCashReadJs())
+End Function
+
+
+' id=value for every box whose name mentions an amount, a total, a balance,
+' a payment or what is due - hidden ones included.
+Private Function CrownAmountsJs() As String
+    CrownAmountsJs = _
+        "var out=[],ins=document.querySelectorAll('input');" & _
+        "for(var i=0;i<ins.length;i++){var e=ins[i],n=(e.id||e.name||'');" & _
+        "if(!/amt|amount|due|tot|cash|bal|down|pay|prem|fee/i.test(n))continue;" & _
+        "if(e.type==='radio'||e.type==='checkbox'){if(e.checked)out.push(n+'=ticked');continue;}" & _
+        "if(e.type==='button'||e.type==='submit')continue;" & _
+        "out.push(n+'='+(e.value||'')+(e.type==='hidden'?'(h)':''));}" & _
+        "return out.join(' ; ').substring(0,1500);"
 End Function
 
 
