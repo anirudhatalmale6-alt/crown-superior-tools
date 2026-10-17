@@ -1618,6 +1618,33 @@ Private Function CrownVerveFutureAgain(ByVal drv As ChromeDriver) As String
     CrownVerveFutureAgain = answer
 End Function
 
+' What Verve did with a lookup that did not open the policy:
+'   clicked  - it showed a list, this exact number was on it, and it was clicked
+'   notfound - it said "Number not found"
+'   list     - it showed a list without this number on it
+'   ""       - something else (a stuck page) - counted towards stopping as before
+Private Function CrownVerveLookupAnswer(ByVal drv As ChromeDriver, ByVal policyNo As String) As String
+    Dim answer As String
+
+    On Error Resume Next
+    answer = CStr(drv.ExecuteScript( _
+        "function clean(s){return ((s||'')+'').replace(/\u00a0/g,' ').replace(/\s+/g,' ').trim();}" & _
+        "var want=clean(arguments[0]).toUpperCase(),els=document.querySelectorAll('a,td,span');" & _
+        "for(var i=0;i<els.length;i++){var e=els[i];if(!e.getClientRects().length)continue;" & _
+        "if(clean(e.innerText).toUpperCase()!==want)continue;" & _
+        "var a=e.tagName==='A'?e:(e.querySelector('a')||e);a.click();return 'clicked';}" & _
+        "var t=clean(document.body?document.body.innerText:'');" & _
+        "if(/number not found/i.test(t))return 'notfound';" & _
+        "var seen={},m=t.match(/GAF\d{6,}/g)||[],n=0;" & _
+        "for(var k=0;k<m.length;k++){if(!seen[m[k]]){seen[m[k]]=1;n++;}}" & _
+        "if(n>=3)return 'list';" & _
+        "return '';", policyNo))
+    If Err.Number <> 0 Then answer = ""
+    On Error GoTo 0
+
+    CrownVerveLookupAnswer = answer
+End Function
+
 ' Tick Combine Installments and Fees, if it is a checkbox we can reach.
 '
 ' Worth doing - it is how he does it by hand - but never relied on. The
@@ -1938,6 +1965,7 @@ Public Sub CrownVervePaymentDue()
     Dim pageWords As String, quiet As Long
     Dim notOpened As Long
     Dim finished As Object, finishedWhy As String, rested As Long
+    Dim lookupAnswer As String
     Dim wsLook As Worksheet, lookRow As Long
     Dim row As Long, done As Long, blank As Long, skipped As Long
     Dim i As Long
@@ -2077,7 +2105,36 @@ Public Sub CrownVervePaymentDue()
         EnterData drv, Keys, VERVE_LOOKUP_BOX, policyNo, "ID", "", True
         ClickElement drv, VERVE_LOOKUP_GO, "ID"
 
-        If Not CrownPageShows(drv, policyNo) Then
+        ' Verve sometimes answers with a list of policies rather than the
+        ' policy itself. If this number is on that list, open it from there.
+        lookupAnswer = ""
+        If Not CrownPageShows(drv, policyNo, 4) Then
+            lookupAnswer = CrownVerveLookupAnswer(drv, policyNo)
+
+            If lookupAnswer = "clicked" Then
+                WaitForPopupToDisappear drv, 15000
+                drv.Wait 800
+            End If
+        End If
+
+        If lookupAnswer = "notfound" Or lookupAnswer = "list" Then
+            ' Verve answered - it simply has no policy of this number to
+            ' open. Not a stuck page, so it does not count towards stopping.
+            note = IIf(lookupAnswer = "notfound", _
+                       "Verve has no policy with this number (Number not found) - nothing written", _
+                       "Verve listed other policies but not this number - nothing written")
+
+            ' Back to a clean page, so that answer cannot still be on screen
+            ' when the next number is looked up and be read as its answer.
+            If CrownVerveRecover(drv, By, wsInput) Then
+                missed = 0
+            Else
+                lookupAnswer = ""
+                missed = missed + 1
+                note = note & " - then Verve stopped answering"
+                If missed >= CONSECUTIVE_BEFORE_GIVING_UP Then stopped = True
+            End If
+        ElseIf Not CrownPageShows(drv, policyNo) Then
             ' Verve is still showing whatever it was showing before. Reading
             ' it would put this customer's record on another customer's
             ' figures, which is exactly what happened on United.
@@ -2324,6 +2381,13 @@ VerveWrite:
             End If
         ElseIf InStr(1, note, "nothing scheduled at Verve", vbTextCompare) > 0 Then
             CrownVerveRemember policyNo, "Verve showed nothing scheduled (Next Activity NONE, Future Premium $0.00)"
+        ElseIf InStr(1, note, "Verve said: NONE", vbTextCompare) > 0 _
+               And Val("0" & Trim$(dueAmount)) <= 0 And Len(futureAmount) = 0 Then
+            ' Next Activity NONE, nothing owed (or a credit), nothing on
+            ' the Future tab - finished, or paid in full. Nothing to chase.
+            CrownVerveRemember policyNo, "nothing owed and nothing scheduled at Verve (Next Activity NONE)"
+        ElseIf lookupAnswer = "notfound" Or lookupAnswer = "list" Then
+            CrownVerveRemember policyNo, "Verve has no policy with this number"
         End If
 
         row = row + 1
