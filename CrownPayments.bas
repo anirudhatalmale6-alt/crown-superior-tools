@@ -1162,9 +1162,34 @@ ReadThePolicy:
                        "} return '';"
             dueDate = drv.ExecuteScript(jsScript)
 
+            ' The date United puts beside the words "Cancellation Date" -
+            ' never just the first date in the schedule box. On an active
+            ' policy that first date is the PAYMENT due date, which is how
+            ' the run of 16 Oct wrote 10-05 as the cancel date of a policy
+            ' United cancels on 10/20 (26 active policies the same way).
+            ' No such words on the page = no cancellation = left empty.
             cancelDate = drv.ExecuteScript( _
-                "var c = document.querySelector('#spnShowSchedule span.pay-dt');" & _
-                "return c ? c.innerText.trim() : '';")
+                "var d=/(\d{1,2}\/\d{1,2}\/\d{2,4})/;" & _
+                "var re=/cancel\w*\s*(?:eff\w*\s*)?date\s*:?\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/i;" & _
+                "var box=document.querySelector('#spnShowSchedule');" & _
+                "var m=re.exec(((box&&box.innerText)||'').replace(/\u00a0/g,' '));" & _
+                "if(!m)m=re.exec((document.body.innerText||'').replace(/\u00a0/g,' '));" & _
+                "if(m)return m[1];" & _
+                "var ps=document.querySelectorAll('#spnShowSchedule span.pay-dt');" & _
+                "for(var i=0;i<ps.length;i++){var row=ps[i].closest('tr')||ps[i].parentNode;" & _
+                "var t=(row.innerText||'').replace(ps[i].innerText,'');" & _
+                "if(/cancel/i.test(t)){var x=d.exec(ps[i].innerText);if(x)return x[1];}}" & _
+                "return '';")
+            cancelDate = Trim$(CStr(cancelDate))
+
+            ' A policy already lapsed or cancelled: the one date in the box
+            ' is its cancel date (what the runs have always read there).
+            If Len(cancelDate) = 0 And (InStr(1, detailStatus, "lapse", vbTextCompare) > 0 _
+                                        Or InStr(1, detailStatus, "cancel", vbTextCompare) > 0) Then
+                cancelDate = Trim$(CStr(drv.ExecuteScript( _
+                    "var c = document.querySelector('#spnShowSchedule span.pay-dt');" & _
+                    "return c ? c.innerText.trim() : '';")))
+            End If
         ElseIf Len(listText) > 0 Then
             If Len(note) = 0 Then note = "United listed its terms but would not open one"
         End If
