@@ -232,6 +232,17 @@ Public Function CrownUnitedPremium(ByVal drv As Object) As Boolean
         Exit Function
     End If
 
+    ' The agency-fees pop-up can come a few seconds after the tick - after
+    ' everything above has already looked. One left open is a page nobody
+    ' can press Continue on (Tony's screenshot of 17 Oct),
+    ' so watch for it for a few seconds more before handing back.
+    started = Now
+    Do
+        If Not CrownHandleAlert(drv) Then Exit Function
+        drv.Wait 500
+        DoEvents
+    Loop While (Now - started) * 86400 < 4
+
     ' Every amount box on the page, hidden ones too - if United still says
     ' the payment does not match its total, this line shows what it wanted.
     CrownNoteBlocker "United payment page amounts: " & CrownUnitedJs(drv, CrownAmountsJs())
