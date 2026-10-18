@@ -308,7 +308,7 @@ End Function
 ' Write answers back onto a record that already exists.
 '
 '   names   e.g. Array("Policy_No", "Insurance_Co_Name", "Amount ")
-'   values  e.g. Array("GAI-211007", "United Auto", "431.00")
+'   values  e.g. Array("GAI-299001", "United Auto", "431.00")
 '
 ' Answers the server's reply. "written" is how many were saved and
 ' "unknown_fields" lists any name the form does not have - always worth
@@ -390,7 +390,7 @@ End Function
 ' handful of differences on top of it.
 '
 '   CrownClone 11, 12083, Array("Policy number", "Description"), _
-'                         Array("GAI -10202602", "Renewal")
+'                         Array("GAI -10299999", "Renewal")
 '
 ' The reply carries the new record's id.
 Public Function CrownClone(ByVal formId As Long, ByVal sourceId As Long, _

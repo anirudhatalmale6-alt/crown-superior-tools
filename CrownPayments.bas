@@ -92,8 +92,8 @@ Private Const COL_STATUS As Long = 8     ' H  Status
 ' Every policy the website holds, as a lookup: the digits of the policy
 ' number -> the record number to write back to.
 '
-' Digits only, because the same policy is written "GAI 212619",
-' "GAI212633" and "GAI - 210184" in different records, and the carriers
+' Digits only, because the same policy is written "GAI 100001",
+' "GAI100002" and "GAI - 100003" in different records, and the carriers
 ' ask for it as a number anyway.
 '
 ' carrier is optional. "United Auto", "UAIG" and "United" all mean the
@@ -1424,7 +1424,7 @@ End Function
 ' The first means a live schedule; the second means a cancellation is on
 ' the way, and the amount and date are then read from their own labels.
 '
-' Verve policy numbers have letters in them - GAF20108199 - so unlike
+' Verve policy numbers have letters in them - GAF29990001 - so unlike
 ' United they are sent exactly as we hold them.
 
 ' Waits for something, and gives up rather than spinning.
@@ -1538,8 +1538,8 @@ End Function
 
 ' Is the policy we asked for actually on the screen?
 '
-' Punctuation out of both sides first: the website writes GAF20108199,
-' GAF-20108199 and GAF 20108199 for the same policy, and a check that says
+' Punctuation out of both sides first: the website writes GAF29990001,
+' GAF-29990001 and GAF 29990001 for the same policy, and a check that says
 ' no to all but one of those is worse than no check.
 Public Function CrownPageShows(ByVal drv As ChromeDriver, ByVal policyNo As String, _
                                 Optional ByVal seconds As Double = 15) As Boolean
@@ -1833,7 +1833,7 @@ End Function
 ' Asked before anything is typed into the carrier's site, so a record
 ' holding "999", "NA" or a blank gets a plain note rather than a lookup
 ' that cannot be verified afterwards. Six characters and four digits is
-' below every real number any of these carriers issues - GAF20108199 has
+' below every real number any of these carriers issues - GAF29990001 has
 ' ten of each - and comfortably above the junk.
 Private Function CrownLooksLikePolicy(ByVal policyNo As String) As Boolean
     Dim i As Long, ch As String
@@ -2066,7 +2066,7 @@ Public Sub CrownVervePaymentDue()
         recordId = parts(0)
         policyNo = Trim$(CStr(parts(2)))
 
-        ' "GAF 20035367" with a space is how the run of 12 Oct stuck: Verve's
+        ' "GAF 29990002" with a space is how the run of 12 Oct stuck: Verve's
         ' lookup did not open it, and the eight after it failed too. Verve
         ' itself never writes a space in a policy number.
         policyNo = Replace(Replace(policyNo, " ", ""), Chr$(160), "")
