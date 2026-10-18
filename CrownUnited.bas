@@ -186,7 +186,26 @@ Public Function CrownUnitedPremium(ByVal drv As Object) As Boolean
     CrownUnitedPrevBalance = CrownMoney(balance)
     CrownUnitedPayToday = CrownMoney(total)
 
-    ' --- Cash ------------------------------------------------------------
+    ' --- Insured Pays Agency, then Cash -----------------------------------
+    ' United starts the Payment Method box on "Credit Card (UAIC collects
+    ' from Insured)" with the whole amount in it. Cash typed under that is
+    ' a second payment of the same amount, and Continue answers "Amount
+    ' for method of payment should be equal to total amount due" - which
+    ' stopped every United quote from 15 to 17 Oct. Tony picks Insured
+    ' Pays Agency first, then types Cash.
+    answer = CrownUnitedJs(drv, CrownAgencyMethodJs())
+
+    If Left$(answer, 2) <> "ok" Then
+        CrownNotePage drv, "United payment page: " & answer
+        CrownLastAlert = "United: could not choose Insured Pays Agency on the payment page"
+
+        Exit Function
+    End If
+
+    CrownNoteBlocker "United payment method: " & answer
+    drv.Wait 1200
+    If Not CrownHandleAlert(drv) Then Exit Function
+
     cash = CrownUnitedTypeCash(drv, CrownUnitedPayToday)
 
     If Left$(cash, 2) <> "ok" Then
@@ -220,6 +239,9 @@ Public Function CrownUnitedPremium(ByVal drv As Object) As Boolean
         cash = CrownUnitedJs(drv, CrownCashReadJs())
         If Abs(Val(cash) - total) < 0.005 Then Exit Do
 
+        CrownUnitedJs drv, CrownAgencyMethodJs()
+        drv.Wait 600
+        If Not CrownHandleAlert(drv) Then Exit Function
         CrownUnitedTypeCash drv, CrownUnitedPayToday
         drv.Wait 800
         If Not CrownHandleAlert(drv) Then Exit Function
@@ -390,6 +412,22 @@ Private Function CrownUnitedTypeCash(ByVal drv As Object, ByVal amount As String
 
     drv.Wait 600
     CrownUnitedTypeCash = "ok " & CrownUnitedJs(drv, CrownCashReadJs())
+End Function
+
+
+' The round button for "Insured Pays Agency" in the Payment Method box:
+' the one whose own part of the page - the largest piece around it that
+' holds no other round button - says Insured Pays Agency.
+Private Function CrownAgencyMethodJs() As String
+    CrownAgencyMethodJs = _
+        "var rs=document.querySelectorAll('input[type=radio]');" & _
+        "for(var i=0;i<rs.length;i++){var r=rs[i],own=r.parentNode,p=own;" & _
+        "while(p&&p.parentNode&&p.parentNode.querySelectorAll('input[type=radio]').length===1)p=p.parentNode;" & _
+        "own=p||own;var t=((own.innerText||'')+' '+(r.nextSibling&&r.nextSibling.textContent||'')).replace(/\s+/g,' ');" & _
+        "if(!/insured pays agency/i.test(t))continue;" & _
+        "var how=' #'+(r.id||r.name||'');if(r.checked)return 'ok Insured Pays Agency already chosen'+how;" & _
+        "r.click();return (r.checked?'ok Insured Pays Agency chosen':'ok clicked Insured Pays Agency')+how;}" & _
+        "return 'no Insured Pays Agency choice';"
 End Function
 
 
