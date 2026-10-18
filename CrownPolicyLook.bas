@@ -32,6 +32,7 @@ Public Sub CrownRecordPolicyPages()
     Dim By As New Selenium.By
     Dim nextRow As Long, n As Long
     Dim tabs As Variant, t As Variant
+    Dim tries As Long, opened As Boolean, answer As String
 
     policyNo = Trim$(InputBox("Policy number to write down (United or Verve):", "Crown Superior"))
     If Len(policyNo) = 0 Then Exit Sub
@@ -68,11 +69,56 @@ Public Sub CrownRecordPolicyPages()
             Exit Sub
         End If
 
-        EnterData drv, Keys, "QuickPolicyLookupControl_NumberInsCombo_I", Replace(policyNo, " ", ""), "ID", "", True
-        ClickElement drv, "QuickPolicyLookupControl_FireLookupImageButton", "ID"
-        CrownLookSettle drv, 6000
+        ' The first try on 17 Oct came back with the home page still on
+        ' screen: the lookup went in while the home page was still loading
+        ' its own lists. So: let it finish, then look the policy up the way
+        ' the payment run does - wait for the number to be ON the page,
+        ' open it from a list if Verve shows one, and try again if not.
+        drv.Wait 3000
 
-        n = CrownLookWrite(ws, nextRow, "Verve", policyNo, "page after the lookup", drv)
+        For tries = 1 To 3
+            CrownVerveKeepAlive drv
+
+            EnterData drv, Keys, "QuickPolicyLookupControl_NumberInsCombo_I", Replace(policyNo, " ", ""), "ID", "", True
+            ClickElement drv, "QuickPolicyLookupControl_FireLookupImageButton", "ID"
+
+            If CrownPageShows(drv, policyNo, 8) Then
+                opened = True
+            Else
+                answer = CrownVerveLookupAnswer(drv, policyNo)
+
+                If answer = "notfound" Then Exit For
+
+                If answer = "clicked" Then opened = CrownPageShows(drv, policyNo, 20)
+            End If
+
+            If opened Then Exit For
+
+            drv.Wait 3000
+        Next tries
+
+        CrownLookSettle drv, 3000
+
+        If Not opened Then
+            n = CrownLookWrite(ws, nextRow, "Verve", policyNo, "DID NOT OPEN (" & _
+                               IIf(answer = "notfound", "Verve said Number not found", "lookup tried 3 times") & _
+                               ") - this is what was on screen", drv)
+
+            ThisWorkbook.Save
+            ws.Activate
+
+            MsgBox "Verve did not open " & policyNo & _
+                   IIf(answer = "notfound", " - it says Number not found.", " after 3 tries.") & vbCrLf & vbCrLf & _
+                   "Please send me the PolicyLook sheet anyway - it shows what Verve had on screen.", _
+                   vbExclamation, "Crown Superior"
+
+            On Error Resume Next
+            drv.Quit
+
+            Exit Sub
+        End If
+
+        n = CrownLookWrite(ws, nextRow, "Verve", policyNo, "policy page", drv)
 
         tabs = Array("Policy Info", "Drivers/Vehicles/Coverages", "Drivers", "Vehicles", "Coverages")
 

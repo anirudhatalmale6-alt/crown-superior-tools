@@ -247,6 +247,13 @@ Public Function CrownUnitedPremium(ByVal drv As Object) As Boolean
     ' the payment does not match its total, this line shows what it wanted.
     CrownNoteBlocker "United payment page amounts: " & CrownUnitedJs(drv, CrownAmountsJs())
 
+    ' Every choice on the page - each tick box and round button with its
+    ' own words and whether it is on, and every visible box with what is
+    ' in it. United keeps answering "Amount for method of payment should be
+    ' equal to total amount due" although every amount above matches, so
+    ' the method chosen is the likely problem, and this shows which one.
+    CrownNoteBlocker "United payment page choices: " & CrownUnitedJs(drv, CrownChoicesJs())
+
     CrownNoteBlocker "United payment page: 16.67% plan, down " & CrownUnitedDown & _
                      " + previous balance " & CrownUnitedPrevBalance & _
                      " = " & CrownUnitedPayToday & " in Cash, Credit/Debit Card ticked (" & answer & ")"
@@ -383,6 +390,23 @@ Private Function CrownUnitedTypeCash(ByVal drv As Object, ByVal amount As String
 
     drv.Wait 600
     CrownUnitedTypeCash = "ok " & CrownUnitedJs(drv, CrownCashReadJs())
+End Function
+
+
+' "id[x] words" for every tick box / round button, "id=value words" for
+' every visible text box, in page order.
+Private Function CrownChoicesJs() As String
+    CrownChoicesJs = _
+        "function c(s){return ((s||'')+'').replace(/\s+/g,' ').trim();}" & _
+        "function words(e){var l=e.id?document.querySelector('label[for=\''+e.id+'\']'):null;" & _
+        "if(l)return c(l.innerText).substring(0,50);var p=e.parentNode,t='';" & _
+        "for(var k=0;k<3&&p&&!t;k++){t=c(p.innerText);p=p.parentNode;}return t.substring(0,50);}" & _
+        "var out=[],es=document.querySelectorAll('input');" & _
+        "for(var i=0;i<es.length;i++){var e=es[i],ty=(e.type||'text').toLowerCase();" & _
+        "if(ty==='hidden'||ty==='button'||ty==='submit')continue;" & _
+        "if(ty==='radio'||ty==='checkbox'){out.push((e.id||e.name)+(e.checked?'[x]':'[ ]')+(e.disabled?'(off)':'')+' '+words(e));}" & _
+        "else if(e.getClientRects().length){out.push((e.id||e.name)+'='+c(e.value)+(e.disabled||e.readOnly?'(off)':'')+' '+words(e));}}" & _
+        "return out.join(' ; ').substring(0,4000);"
 End Function
 
 

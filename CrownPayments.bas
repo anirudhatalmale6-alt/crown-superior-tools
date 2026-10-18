@@ -1541,7 +1541,7 @@ End Function
 ' Punctuation out of both sides first: the website writes GAF20108199,
 ' GAF-20108199 and GAF 20108199 for the same policy, and a check that says
 ' no to all but one of those is worse than no check.
-Private Function CrownPageShows(ByVal drv As ChromeDriver, ByVal policyNo As String, _
+Public Function CrownPageShows(ByVal drv As ChromeDriver, ByVal policyNo As String, _
                                 Optional ByVal seconds As Double = 15) As Boolean
     Dim answer As String
     Dim wanted As String
@@ -1648,7 +1648,7 @@ End Function
 '   notfound - it said "Number not found"
 '   list     - it showed a list without this number on it
 '   ""       - something else (a stuck page) - counted towards stopping as before
-Private Function CrownVerveLookupAnswer(ByVal drv As ChromeDriver, ByVal policyNo As String) As String
+Public Function CrownVerveLookupAnswer(ByVal drv As ChromeDriver, ByVal policyNo As String) As String
     Dim answer As String
 
     On Error Resume Next
@@ -1938,7 +1938,7 @@ End Function
 ' is usually the LABEL - a div holding the words "Session Expiring" and
 ' nothing else. The element wanted is the smallest one that both says it
 ' AND has something pressable in it.
-Private Function CrownVerveKeepAlive(ByVal drv As ChromeDriver) As String
+Public Function CrownVerveKeepAlive(ByVal drv As ChromeDriver) As String
     Dim answer As String
 
     On Error Resume Next
