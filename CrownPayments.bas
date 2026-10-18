@@ -36,6 +36,7 @@ Public Const CROWN_PAYMENTS_VERSION As String = "6 Oct c - presses OK on Verve's
 ' their side is one line here rather than a hunt through the code.
 Private Const VERVE_LOOKUP_BOX As String = "QuickPolicyLookupControl_NumberInsCombo_I"
 Private Const VERVE_LOOKUP_GO As String = "QuickPolicyLookupControl_FireLookupImageButton"
+Private Const VERVE_SIGNIN_BOX As String = "LoginControl_LoginNameTextBox"
 Private Const VERVE_BILLING_TAB As String = "//*[@id='TabBar']/ul/li[5]/div/a"
 Private Const VERVE_ACTIVITY As String = "P_L_v212w3_t4_ActivityStringInsLabel"
 Private Const VERVE_DUE_DATE As String = "P_L_v212w3_t4_DueDateInsLabel"
@@ -1858,13 +1859,51 @@ End Function
 ' Verve stops answering the lookup box now and then - a bad number, a
 ' session that has gone stale, a dialog nobody saw. Until 6 Oct nothing
 ' noticed, and a run would carry on asking a dead page for two hours.
+'
+' URL_9 is Verve's SIGN-IN page. Going back to it, as this did until 18
+' Oct, left the run sitting on the sign-in form waiting for a lookup box
+' that only exists once signed in - the run of 17 Oct stopped 97 policies
+' early that way, right after the first "Number not found". Now: if the
+' sign-in form is what comes up, sign in again, then wait for the lookup.
 Private Function CrownVerveRecover(ByVal drv As ChromeDriver, ByVal By As Selenium.By, _
                                    ByVal wsInput As Worksheet) As Boolean
+    Dim Keys As New Selenium.Keys
+    Dim started As Date
+    Dim signedIn As Boolean
+
     On Error Resume Next
     drv.Get wsInput.Range("URL_9").value
     On Error GoTo 0
 
-    CrownVerveRecover = CrownWaitFor(drv, By, "ID", VERVE_LOOKUP_BOX, 45)
+    started = Now
+
+    Do
+        If drv.IsElementPresent(By.ID(VERVE_LOOKUP_BOX)) Then
+            CrownVerveRecover = True
+
+            Exit Function
+        End If
+
+        If Not signedIn And drv.IsElementPresent(By.ID(VERVE_SIGNIN_BOX)) Then
+            On Error Resume Next
+            EnterData drv, Keys, VERVE_SIGNIN_BOX, wsInput.Range("USER_2").value, "ID"
+            EnterData drv, Keys, "LoginControl_PasswordTextBox", wsInput.Range("PASS_2").value, "ID"
+            ClickElement drv, "LoginControl_LoginLinkButton", "ID"
+            On Error GoTo 0
+            signedIn = True
+        End If
+
+        drv.Wait 700
+        DoEvents
+    Loop While (Now - started) * 86400 < 75
+End Function
+
+
+' Verve has signed this browser out (its sign-in form is on screen).
+Private Function CrownVerveSignedOut(ByVal drv As ChromeDriver, ByVal By As Selenium.By) As Boolean
+    On Error Resume Next
+    CrownVerveSignedOut = drv.IsElementPresent(By.ID(VERVE_SIGNIN_BOX)) _
+                          And Not drv.IsElementPresent(By.ID(VERVE_LOOKUP_BOX))
 End Function
 
 
@@ -1991,6 +2030,7 @@ Public Sub CrownVervePaymentDue()
     Dim notOpened As Long
     Dim finished As Object, finishedWhy As String, rested As Long
     Dim lookupAnswer As String
+    Dim signedBackIn As Long
     Dim wsLook As Worksheet, lookRow As Long
     Dim row As Long, done As Long, blank As Long, skipped As Long
     Dim i As Long
@@ -2125,6 +2165,15 @@ Public Sub CrownVervePaymentDue()
         If Left$(sessionNote, 7) = "pressed" Then
             drv.Wait 600
             dismissed = dismissed + 1
+        End If
+
+        ' Signed out (Verve does that after a while, and after some
+        ' errors): sign back in before typing a number into nothing.
+        If CrownVerveSignedOut(drv, By) Then
+            If CrownVerveRecover(drv, By, wsInput) Then
+                signedBackIn = signedBackIn + 1
+                missed = 0
+            End If
         End If
 
         EnterData drv, Keys, VERVE_LOOKUP_BOX, policyNo, "ID", "", True
@@ -2437,6 +2486,8 @@ NextVerve:
            reportNote & vbCrLf & vbCrLf & _
            IIf(dismissed > 0, "Verve's Session Expiring box was dismissed " & dismissed & _
                " times." & vbCrLf, "") & _
+           IIf(signedBackIn > 0, "Verve signed the browser out " & signedBackIn & _
+               " time(s) - it was signed back in and carried on." & vbCrLf, "") & _
            IIf(looked > 0, "The Future tab could not be read on " & looked & " policies. " & _
                "What those pages actually say is written on the VerveLook sheet - " & _
                "please send me that sheet." & vbCrLf & vbCrLf, "") & _

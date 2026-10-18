@@ -120,7 +120,7 @@ Public Sub CrownRecordPolicyPages()
 
         n = CrownLookWrite(ws, nextRow, "Verve", policyNo, "policy page", drv)
 
-        tabs = Array("Policy Info", "Drivers/Vehicles/Coverages", "Drivers", "Vehicles", "Coverages")
+        tabs = Array("Policy Info", "Drivers/Vehicles/Coverages", "Drivers", "Vehicles", "Coverages", "Billing", "Future")
 
         For Each t In tabs
             If CrownLookClickText(drv, CStr(t)) Then
