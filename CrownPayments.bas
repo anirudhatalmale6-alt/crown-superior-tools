@@ -1707,28 +1707,42 @@ End Function
 ' page showed why: the statement sits in the same document as the future
 ' list, has the same four headings, and has fewer rows - so it wins on
 ' size and the figure written to the website is last month's instalment,
-' already paid, dated in the past. Only tables actually on the screen are
-' considered, which is what tells a tab that is showing from a tab that
-' is merely still loaded.
+' already paid, dated in the past. So the pick is by how many lines are
+' dated today or later, not by size (see inside).
 Private Function CrownVerveFutureRows(ByVal drv As ChromeDriver) As String
     Dim answer As String
 
+    ' Found by what is IN it, not by being on screen. On 17 Oct the tab
+    ' click kept leaving another tab showing, so "only tables on the
+    ' screen" found nothing on ten policies while the Future lines sat
+    ' loaded underneath. Now every table with Due Date and Amount (and not
+    ' Billed - that is the Billing Transaction History) is a candidate,
+    ' and the one with the most lines dated today or later wins: that is
+    ' the Future list (the Statement holds what has already been billed).
+    ' Lines dated in the past are thrown out later anyway, in
+    ' CrownVerveNextDue.
     On Error Resume Next
     answer = drv.ExecuteScript( _
-        "var best=null,small=0,bestTrans=false," & _
-        "tabs=document.getElementsByTagName('table');" & _
-        "for(var i=0;i<tabs.length;i++){var t=tabs[i],x=(t.innerText||'')+'';" & _
-        "if(x.indexOf('Due Date')<0||x.indexOf('Amount')<0)continue;" & _
-        "if(!t.getClientRects().length)continue;" & _
-        "var trans=x.indexOf('Trans Date')>=0;" & _
-        "if(bestTrans&&!trans)continue;" & _
-        "if(best===null||(trans&&!bestTrans)||x.length<small){" & _
-        "best=t;small=x.length;bestTrans=trans;}}" & _
-        "if(!best)return '';var out=[];" & _
-        "for(var r=0;r<best.rows.length;r++){var cs=best.rows[r].cells,line=[];" & _
-        "for(var c=0;c<cs.length;c++){line.push(((cs[c].innerText||'')+'')" & _
-        ".replace(/[|~]/g,' ').replace(/\s+/g,' ').replace(/^ | $/g,''));}" & _
-        "out.push(line.join('|'));}return out.join('~');")
+        "function c(s){return ((s||'')+'').replace(/ /g,' ').replace(/[|~]/g,' ').replace(/\s+/g,' ').trim();}" & _
+        "function dt(s){var m=/(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(s||'');return m?new Date(+m[3],m[1]-1,+m[2]):null;}" & _
+        "var T=new Date();T.setHours(0,0,0,0);" & _
+        "var cs=[],ts=document.getElementsByTagName('table');" & _
+        "for(var i=0;i<ts.length;i++){var t=ts[i],x=(t.innerText||t.textContent||'');" & _
+        "if(x.indexOf('Due Date')<0||x.indexOf('Amount')<0||/Billed/.test(x))continue;" & _
+        "var trs=t.querySelectorAll('tr'),lines=[],h=-1;" & _
+        "for(var r=0;r<trs.length;r++){if(trs[r].querySelector('table'))continue;var cl=trs[r].cells,ln=[];" & _
+        "for(var k=0;k<cl.length;k++)ln.push(c(cl[k].innerText||cl[k].textContent));" & _
+        "var j=ln.join('|');if(!j.replace(/\|/g,''))continue;" & _
+        "if(h<0&&j.indexOf('Due Date')>=0&&j.indexOf('Amount')>=0){h=lines.length;}lines.push(j);}" & _
+        "if(h<0)continue;var fut=0;" & _
+        "for(var q=h+1;q<lines.length;q++){var d=dt(lines[q]);if(d&&d>=T)fut++;}" & _
+        "cs.push({t:t,lines:lines.slice(h),fut:fut,vis:!!t.getClientRects().length,len:x.length});}" & _
+        "if(!cs.length)return '';" & _
+        "cs.sort(function(a,b){return (b.fut-a.fut)||((b.vis?1:0)-(a.vis?1:0))||(a.len-b.len);});" & _
+        "var best=cs[0],moved=true;" & _
+        "while(moved){moved=false;for(var m=0;m<cs.length;m++){var o=cs[m];" & _
+        "if(o!==best&&best.t.contains(o.t)&&o.fut>0&&o.lines.length>1){best=o;moved=true;break;}}}" & _
+        "return best.lines.join('~');")
     On Error GoTo 0
 
     CrownVerveFutureRows = answer
