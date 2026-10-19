@@ -127,6 +127,19 @@ Public Sub CrownAssurancePaymentDue()
         GoTo Finish
     End If
 
+    ' Every policy number on the list, for the same reason as Trexis.
+    Dim listed As Object
+    Set listed = CreateObject("Scripting.Dictionary")
+
+    For Each idx In picks
+        info = CrownMoreJs(drv, CrownAaRowJs(), CStr(idx))
+
+        If Left$(info, 3) = "ok|" Then
+            parts = Split(info, "|")
+            If Len(CrownDigits(parts(2))) > 0 Then listed(CrownDigits(parts(2))) = True
+        End If
+    Next idx
+
     ' --- each policy ----------------------------------------------------
     For Each idx In picks
         dueAmount = "": dueDate = "": cancelDate = "": status = ""
@@ -183,7 +196,7 @@ Public Sub CrownAssurancePaymentDue()
         On Error GoTo 0
         drv.Wait 800
 
-        recordId = CrownMoreMatch(byNumber, byName, AA_CARRIER, policyNo, insured, matchedOn, note)
+        recordId = CrownMoreMatch(byNumber, byName, AA_CARRIER, policyNo, insured, matchedOn, note, listed)
 
         ws.Cells(row, 2).value = policyNo
         ws.Cells(row, 3).value = insured
@@ -305,6 +318,7 @@ Public Sub CrownTrexisPaymentDue()
     Dim recordId As String, matchedOn As String, note As String
     Dim done As Long, unmatched As Long, failed As Long
     Dim started As Date, exportAt As Date
+    Dim listed As Object
 
     Set wsInput = ThisWorkbook.Worksheets("Input")
 
@@ -409,6 +423,17 @@ Public Sub CrownTrexisPaymentDue()
         GoTo Finish
     End If
 
+    ' Every number on the export, so a name match cannot land on a record
+    ' that belongs to another policy on this same list.
+    Set listed = CreateObject("Scripting.Dictionary")
+
+    For i = 1 To UBound(lines)
+        f = CrownSplitCsvLine(lines(i))
+        If UBound(f) >= cPol Then
+            If Len(CrownDigits(f(cPol))) > 0 Then listed(CrownDigits(f(cPol))) = True
+        End If
+    Next i
+
     ' --- each policy in the export -----------------------------------------
     For i = 1 To UBound(lines)
         If Len(Trim$(lines(i))) = 0 Then GoTo NextTrexis
@@ -434,7 +459,7 @@ Public Sub CrownTrexisPaymentDue()
             cancelDate = statusDate
         End If
 
-        recordId = CrownMoreMatch(byNumber, byName, TX_CARRIER, policyNo, insured, matchedOn, note)
+        recordId = CrownMoreMatch(byNumber, byName, TX_CARRIER, policyNo, insured, matchedOn, note, listed)
 
         ws.Cells(row, 2).value = policyNo
         ws.Cells(row, 3).value = insured
@@ -674,7 +699,8 @@ End Function
 ' The website record for a carrier's policy, or "" with the reason in note.
 Private Function CrownMoreMatch(ByVal byNumber As Object, ByVal byName As Object, ByVal carrier As String, _
                                 ByVal policyNo As String, ByVal insured As String, _
-                                ByRef matchedOn As String, ByRef note As String) As String
+                                ByRef matchedOn As String, ByRef note As String, _
+                                Optional ByVal listed As Object = Nothing) As String
     Dim digits As String, first As String, last As String, nameKey As String
     Dim list As Variant, parts As Variant
     Dim j As Long, found As String, words() As String
@@ -728,6 +754,18 @@ Private Function CrownMoreMatch(ByVal byNumber As Object, ByVal byName As Object
         For j = LBound(list) To UBound(list)
             parts = list(j)
 
+            ' 19 Oct: a customer with two Trexis policies; the website held
+            ' only the older. The newer one matched him by name and wrote its
+            ' figures over the older one's. A record whose own number is ALSO
+            ' on the carrier's list this run belongs to that policy, not this.
+            If Not listed Is Nothing Then
+                If listed.Exists(CrownDigits(CStr(parts(2)))) And CrownDigits(CStr(parts(2))) <> CrownDigits(policyNo) Then
+                    note = "the website record for this name (" & parts(2) & ") is a different " & carrier & _
+                           " policy, also on " & carrier & "'s list - not overwritten"
+                    GoTo NextCandidate
+                End If
+            End If
+
             If CrownSameCarrier(carrier, CStr(parts(3))) Then
                 If Len(found) > 0 Then
                     note = "that name has more than one " & carrier & " policy on the website - not guessed"
@@ -736,9 +774,11 @@ Private Function CrownMoreMatch(ByVal byNumber As Object, ByVal byName As Object
 
                 found = CStr(parts(0))
             End If
+NextCandidate:
         Next j
 
         If Len(found) > 0 Then
+            note = ""
             CrownMoreMatch = found
             matchedOn = "name (the number did not match)"
         End If
