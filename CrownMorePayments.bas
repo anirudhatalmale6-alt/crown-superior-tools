@@ -2,9 +2,10 @@ Attribute VB_Name = "CrownMorePayments"
 Option Explicit
 
 ' =====================================================================
-' Crown Superior - payment due for Assurance America (and Trexis next)
+' Crown Superior - payment due for Assurance America and Trexis
 ' ---------------------------------------------------------------------
 ' Alt+F8 > CrownAssurancePaymentDue > Run
+' Alt+F8 > CrownTrexisPaymentDue > Run    (further down)
 '
 ' Same idea as the United and Verve runs: each policy's amount due, due
 ' date, cancel date and status go straight onto the website, one policy at
@@ -27,6 +28,7 @@ Option Explicit
 
 Private Const AA_CARRIER As String = "Assurance America"
 Private Const AA_LIST_WAIT_SECONDS As Long = 120
+Private Const TX_CARRIER As String = "Trexis"
 
 
 Public Sub CrownAssurancePaymentDue()
@@ -273,6 +275,349 @@ Private Function CrownAaDetailJs() As String
 End Function
 
 
+' =====================================================================
+' Trexis
+' ---------------------------------------------------------------------
+' Alt+F8 > CrownTrexisPaymentDue > Run
+'
+' His ScrapeTrexisPolicy1234 steps: sign in (URL_8, USER_6 / PASS_6),
+' Policy, Search, "Export" - Trexis hands back a CSV of its policies with
+' Status, Status Date and Amount Due. For a policy still In-Force the
+' date the payment is due is only on the policy's own page ("Current
+' Payment Due"), so those - and only those - are opened.
+'
+' Written to the website the way his upload did it: Status as Trexis
+' words it, Amount Due, the due date from the policy page, and the Status
+' Date as the cancel date unless the policy is In-Force.
+' =====================================================================
+
+Public Sub CrownTrexisPaymentDue()
+    Dim drv As ChromeDriver, clsDrv As Chrm
+    Dim Keys As New Selenium.Keys
+    Dim wsInput As Worksheet, ws As Worksheet
+    Dim byNumber As Object, byName As Object
+    Dim answer As String, csvPath As String
+    Dim lines() As String, head() As String, f() As String
+    Dim cPol As Long, cName As Long, cStatus As Long, cDate As Long, cAmount As Long
+    Dim i As Long, row As Long
+    Dim policyNo As String, insured As String, status As String, statusDate As String
+    Dim dueAmount As String, dueDate As String, cancelDate As String
+    Dim recordId As String, matchedOn As String, note As String
+    Dim done As Long, unmatched As Long, failed As Long
+    Dim started As Date, exportAt As Date
+
+    Set wsInput = ThisWorkbook.Worksheets("Input")
+
+    CrownMoreIndex TX_CARRIER, byNumber, byName
+
+    If byNumber.Count = 0 And byName.Count = 0 Then
+        MsgBox "No Trexis policies came back from the website.", vbExclamation, "Crown Superior"
+        Exit Sub
+    End If
+
+    Set ws = CrownSheet("TrexisPayments")
+    ws.Cells.ClearContents
+    ws.Columns(2).NumberFormat = "@"
+    ws.Range("A1:J1").value = Array("Record number", "Policy at Trexis", "Insured", "Amount due", _
+                                    "Due date", "Cancel date", "Status", "When", "Matched on", "What happened")
+    row = 2
+
+    Set clsDrv = New Chrm
+    Set clsDrv.ChrmDriver = New ChromeDriver
+    Set drv = clsDrv.ChrmDriver
+
+    On Error Resume Next
+    drv.AddArgument "--force-device-scale-factor=0.70"
+    drv.AddArgument "--disable-extensions"
+    drv.AddArgument "--disable-popup-blocking"
+    drv.Start
+    On Error GoTo 0
+
+    drv.Get wsInput.Range("URL_8").value
+
+    ' --- sign in ---------------------------------------------------------
+    If Not CrownMoreWaitJs(drv, "return (document.getElementById('loginName')&&document.getElementById('loginPassword'))?'ok':'';", 60) Then
+        MsgBox "Trexis did not show its sign-in page. Nothing has been changed.", vbExclamation, "Crown Superior"
+        GoTo Finish
+    End If
+
+    EnterData drv, Keys, "loginName", wsInput.Range("USER_6").value, "ID"
+    EnterData drv, Keys, "loginPassword", wsInput.Range("PASS_6").value, "ID"
+    drv.Wait 1000
+    ClickElement drv, "//*[@id='loginSubmit']/div[1]/button", "XPATH"
+
+    If Not CrownMoreWaitJs(drv, "return document.getElementById('agentHomePolicyButton')?'ok':'';", 90) Then
+        MsgBox "Signed in to Trexis, but its home page never came up. Nothing has been changed.", _
+               vbExclamation, "Crown Superior"
+        GoTo Finish
+    End If
+
+    drv.Wait 3000
+
+    ' The notice box his macro closes, when it is there.
+    CrownMoreJs drv, "var b=document.evaluate(""//*[@id='modalPopupAM']/div/div[3]/button"",document,null," & _
+                     "XPathResult.FIRST_ORDERED_NODE_TYPE,null).singleNodeValue;if(b&&b.offsetParent)b.click();return '';"
+    drv.Wait 800
+
+    ' --- Policy > Search > Export -----------------------------------------
+    CrownMoreJs drv, "var b=document.getElementById('agentHomePolicyButton');if(b)b.click();return '';"
+
+    If Not CrownMoreWaitJs(drv, "return document.getElementById('searchPolicyQuote')?'ok':'';", 30) Then
+        ' His WaitForPageChange: the policy centre sometimes needs a reload.
+        drv.Refresh
+        If Not CrownMoreWaitJs(drv, "return document.getElementById('searchPolicyQuote')?'ok':'';", 30) Then
+            MsgBox "Trexis did not open its policy search. Nothing has been changed.", vbExclamation, "Crown Superior"
+            GoTo Finish
+        End If
+    End If
+
+    ClickElement drv, "searchPolicyQuote", "ID"
+
+    If Not CrownMoreWaitJs(drv, "return document.getElementById('exportPolicyRecordsToCVS')?'ok':'';", 60) Then
+        MsgBox "Trexis did not show its Export button. Nothing has been changed.", vbExclamation, "Crown Superior"
+        GoTo Finish
+    End If
+
+    exportAt = Now
+    ClickElement drv, "exportPolicyRecordsToCVS", "ID"
+
+    csvPath = CrownMoreNewDownload(exportAt, 90)
+
+    If Len(csvPath) = 0 Then
+        MsgBox "Trexis's export file never arrived in Downloads. Nothing has been changed.", _
+               vbExclamation, "Crown Superior"
+        GoTo Finish
+    End If
+
+    lines = Split(Replace(CrownMoreReadText(csvPath), vbCrLf, vbLf), vbLf)
+
+    If UBound(lines) < 1 Then
+        MsgBox "Trexis's export file was empty. Nothing has been changed.", vbExclamation, "Crown Superior"
+        GoTo Finish
+    End If
+
+    head = CrownSplitCsvLine(lines(0))
+    cPol = CrownMoreColumn(head, "Policy Number")
+    cName = CrownMoreColumn(head, "Insured Name")
+    cStatus = CrownMoreColumn(head, "Status")
+    cDate = CrownMoreColumn(head, "Status Date")
+    cAmount = CrownMoreColumn(head, "Amount Due")
+
+    If cPol < 0 Or cStatus < 0 Or cAmount < 0 Then
+        MsgBox "Trexis's export file did not have the columns expected (Policy Number, Status, Amount Due)." & _
+               vbCrLf & vbCrLf & "It is " & csvPath & " - please send it to me.", vbExclamation, "Crown Superior"
+        GoTo Finish
+    End If
+
+    ' --- each policy in the export -----------------------------------------
+    For i = 1 To UBound(lines)
+        If Len(Trim$(lines(i))) = 0 Then GoTo NextTrexis
+
+        f = CrownSplitCsvLine(lines(i))
+        If UBound(f) < cAmount Or UBound(f) < cPol Then GoTo NextTrexis
+
+        policyNo = Trim$(f(cPol))
+        insured = ""
+        If cName >= 0 And UBound(f) >= cName Then insured = Trim$(f(cName))
+        status = Trim$(f(cStatus))
+        statusDate = ""
+        If cDate >= 0 And UBound(f) >= cDate Then statusDate = CrownMoreDate(f(cDate))
+        dueAmount = CrownMoreMoney(f(cAmount))
+        dueDate = ""
+        cancelDate = ""
+        note = ""
+        matchedOn = ""
+
+        If StrComp(Replace(status, " ", ""), "In-Force", vbTextCompare) = 0 Then
+            dueDate = CrownTrexisDueDate(drv, policyNo, note)
+        Else
+            cancelDate = statusDate
+        End If
+
+        recordId = CrownMoreMatch(byNumber, byName, TX_CARRIER, policyNo, insured, matchedOn, note)
+
+        ws.Cells(row, 2).value = policyNo
+        ws.Cells(row, 3).value = insured
+        ws.Cells(row, 4).value = dueAmount
+        ws.Cells(row, 5).value = dueDate
+        ws.Cells(row, 6).value = cancelDate
+        ws.Cells(row, 7).value = status
+        ws.Cells(row, 8).value = Now
+        ws.Cells(row, 9).value = matchedOn
+
+        If Len(recordId) = 0 Then
+            If Len(note) = 0 Then note = "no policy on the website with this number or this name"
+            ws.Cells(row, 10).value = note
+            unmatched = unmatched + 1
+        Else
+            ws.Cells(row, 1).value = recordId
+            answer = CrownMoreWrite(recordId, dueAmount, dueDate, cancelDate, status)
+
+            If InStr(1, answer, """ok"":true", vbTextCompare) > 0 Then
+                ws.Cells(row, 10).value = Trim$("written. " & note)
+                done = done + 1
+            ElseIf Len(Trim$(answer)) = 0 Then
+                ws.Cells(row, 10).value = "the website did not answer - run again for this one"
+                failed = failed + 1
+            Else
+                ws.Cells(row, 10).value = "refused: " & answer
+                failed = failed + 1
+            End If
+        End If
+
+        row = row + 1
+NextTrexis:
+        DoEvents
+    Next i
+
+Finish:
+    On Error Resume Next
+    drv.Quit
+    On Error GoTo 0
+
+    ws.Columns("A:J").AutoFit
+    ThisWorkbook.Save
+    ws.Activate
+
+    MsgBox done & " Trexis policies written to the website." & vbCrLf & _
+           unmatched & " could not be matched to a policy on the website." & vbCrLf & _
+           failed & " did not go through." & vbCrLf & vbCrLf & _
+           "The TrexisPayments sheet has every one, and how it was matched.", _
+           vbInformation, "Crown Superior"
+End Sub
+
+
+' The "Current Payment Due" date off one policy's own page: find it on the
+' list (25 to a page), open it, read it, go back to the list.
+Private Function CrownTrexisDueDate(ByVal drv As ChromeDriver, ByVal policyNo As String, ByRef note As String) As String
+    Dim pages As Long, p As Long
+    Dim answer As String
+
+    CrownMoreWaitJs drv, "return document.getElementById('policiesListTable')?'ok':'';", 20
+
+    pages = Val(CrownMoreJs(drv, "var s=document.getElementById('policiesPage');return s?String(s.options.length):'1';"))
+    If pages < 1 Then pages = 1
+
+    For p = 1 To pages
+        If p > 1 Or pages > 1 Then
+            CrownMoreJs drv, "var s=document.getElementById('policiesPage');if(s&&s.options.length>=" & p & "){" & _
+                             "s.selectedIndex=" & (p - 1) & ";s.dispatchEvent(new Event('change',{bubbles:true}));}return '';"
+            drv.Wait 1500
+        End If
+
+        answer = CrownMoreJs(drv, _
+            "var w=arguments[0],td=document.querySelectorAll('#policiesListTable td.policy-number');" & _
+            "for(var i=0;i<td.length;i++){if((td[i].innerText||'').trim()===w){td[i].click();return 'clicked';}}return '';", policyNo)
+
+        If answer = "clicked" Then Exit For
+    Next p
+
+    If answer <> "clicked" Then
+        note = "not on the Trexis list to open - no due date"
+        Exit Function
+    End If
+
+    If CrownMoreWaitJs(drv, "return (location.href.indexOf('#PolicyDetails')>=0&&" & _
+                            "document.evaluate(""//b[normalize-space(text())='Current Payment Due']/parent::div/following-sibling::div""," & _
+                            "document,null,XPathResult.FIRST_ORDERED_NODE_TYPE,null).singleNodeValue)?'ok':'';", 20) Then
+        answer = CrownMoreJs(drv, _
+            "var d=document.evaluate(""//b[normalize-space(text())='Current Payment Due']/parent::div/following-sibling::div""," & _
+            "document,null,XPathResult.FIRST_ORDERED_NODE_TYPE,null).singleNodeValue;return d?(d.innerText||'').trim():'';")
+        CrownTrexisDueDate = CrownMoreDate(answer)
+
+        If Len(CrownTrexisDueDate) = 0 Then note = "the policy page had no Current Payment Due date"
+    Else
+        note = "the policy page did not open - no due date"
+    End If
+
+    ' Back to the list, as his macro does.
+    CrownMoreJs drv, "var b=document.getElementById('searchPolicy');if(b)b.click();return '';"
+
+    If Not CrownMoreWaitJs(drv, "return document.getElementById('policiesListTable')?'ok':'';", 15) Then
+        CrownMoreJs drv, "var b=document.getElementById('searchPolicyQuote');if(b)b.click();return '';"
+        CrownMoreWaitJs drv, "return document.getElementById('policiesListTable')?'ok':'';", 20
+    End If
+End Function
+
+
+' The newest .csv in Downloads written after a moment, waited for.
+Private Function CrownMoreNewDownload(ByVal after As Date, ByVal seconds As Long) As String
+    Dim fso As Object, file As Object
+    Dim folder As String, best As String, bestAt As Date
+    Dim started As Date
+
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    folder = Environ$("USERPROFILE") & "\Downloads"
+    started = Now
+
+    Do
+        best = ""
+        bestAt = after - 1 / 86400
+
+        For Each file In fso.GetFolder(folder).Files
+            If LCase$(fso.GetExtensionName(file.Name)) = "csv" And file.DateLastModified >= bestAt Then
+                best = file.Path
+                bestAt = file.DateLastModified
+            End If
+        Next file
+
+        If Len(best) > 0 Then
+            Application.Wait Now + TimeSerial(0, 0, 2)   ' let it finish writing
+            CrownMoreNewDownload = best
+            Exit Function
+        End If
+
+        Application.Wait Now + TimeSerial(0, 0, 1)
+        DoEvents
+    Loop While (Now - started) * 86400 < seconds
+End Function
+
+Private Function CrownMoreReadText(ByVal path As String) As String
+    Dim stream As Object
+
+    Set stream = CreateObject("ADODB.Stream")
+    stream.Type = 2
+    stream.Charset = "utf-8"
+    stream.Open
+    stream.LoadFromFile path
+    CrownMoreReadText = stream.ReadText
+    stream.Close
+
+    ' A byte-order mark in front of the first heading.
+    If Left$(CrownMoreReadText, 1) = ChrW$(&HFEFF) Then CrownMoreReadText = Mid$(CrownMoreReadText, 2)
+End Function
+
+Private Function CrownMoreColumn(ByRef head() As String, ByVal wanted As String) As Long
+    Dim i As Long
+
+    For i = LBound(head) To UBound(head)
+        If StrComp(Trim$(head(i)), wanted, vbTextCompare) = 0 Then
+            CrownMoreColumn = i
+            Exit Function
+        End If
+    Next i
+
+    CrownMoreColumn = -1
+End Function
+
+' True once the script answers "ok", within the time.
+Private Function CrownMoreWaitJs(ByVal drv As Object, ByVal script As String, ByVal seconds As Long) As Boolean
+    Dim started As Date
+
+    started = Now
+
+    Do
+        If CrownMoreJs(drv, script) = "ok" Then
+            CrownMoreWaitJs = True
+            Exit Function
+        End If
+
+        drv.Wait 700
+        DoEvents
+    Loop While (Now - started) * 86400 < seconds
+End Function
+
+
 ' ---------------------------------------------------------------------
 ' Shared by the carrier runs in this module
 ' ---------------------------------------------------------------------
@@ -409,7 +754,8 @@ Private Function CrownMoreWrite(ByVal recordId As String, ByVal amount As String
         Array(amount, dueDate, cancelDate, status, "Yes", Format$(Now, "mm-dd-yyyy hh:mm AM/PM")))
 End Function
 
-' "10/25/2026" or "(10/25/2026)" -> "10-25-2026"; anything else as it came.
+' "10/25/2026" or "(10/25/2026)" -> "10-25-2026". No date in it ("Not
+' Found", blank) -> "" - never words where a date belongs.
 Private Function CrownMoreDate(ByVal text As String) As String
     Dim m As Object
 
@@ -427,8 +773,6 @@ Private Function CrownMoreDate(ByVal text As String) As String
             If Len(y) = 2 Then y = "20" & y
             CrownMoreDate = Format$(DateSerial(CLng(y), CLng(.SubMatches(0)), CLng(.SubMatches(1))), "mm-dd-yyyy")
         End With
-    Else
-        CrownMoreDate = text
     End If
 End Function
 
