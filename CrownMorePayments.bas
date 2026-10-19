@@ -298,7 +298,7 @@ Public Sub CrownTrexisPaymentDue()
     Dim byNumber As Object, byName As Object
     Dim answer As String, csvPath As String
     Dim lines() As String, head() As String, f() As String
-    Dim cPol As Long, cName As Long, cStatus As Long, cDate As Long, cAmount As Long
+    Dim cPol As Long, cName As Long, cStatus As Long, cStatusDate As Long, cAmount As Long
     Dim i As Long, row As Long
     Dim policyNo As String, insured As String, status As String, statusDate As String
     Dim dueAmount As String, dueDate As String, cancelDate As String
@@ -400,7 +400,7 @@ Public Sub CrownTrexisPaymentDue()
     cPol = CrownMoreColumn(head, "Policy Number")
     cName = CrownMoreColumn(head, "Insured Name")
     cStatus = CrownMoreColumn(head, "Status")
-    cDate = CrownMoreColumn(head, "Status Date")
+    cStatusDate = CrownMoreColumn(head, "Status Date")
     cAmount = CrownMoreColumn(head, "Amount Due")
 
     If cPol < 0 Or cStatus < 0 Or cAmount < 0 Then
@@ -421,7 +421,7 @@ Public Sub CrownTrexisPaymentDue()
         If cName >= 0 And UBound(f) >= cName Then insured = Trim$(f(cName))
         status = Trim$(f(cStatus))
         statusDate = ""
-        If cDate >= 0 And UBound(f) >= cDate Then statusDate = CrownMoreDate(f(cDate))
+        If cStatusDate >= 0 And UBound(f) >= cStatusDate Then statusDate = CrownMoreDate(f(cStatusDate))
         dueAmount = CrownMoreMoney(f(cAmount))
         dueDate = ""
         cancelDate = ""
