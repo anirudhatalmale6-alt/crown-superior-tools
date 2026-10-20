@@ -973,6 +973,9 @@ Public Sub CrownUaigPaymentDue()
     drv.Start
     On Error GoTo 0
 
+    ' Chrome did not start (usually: Chrome updated, chromedriver is old) - say so in words.
+    If Not CrownChromeOk(drv) Then Exit Sub
+
     drv.Get wsInput.Range("URL_26").value
     EnterData drv, Keys, "tbxUserID", wsInput.Range("USER_26").value, "ID"
     EnterData drv, Keys, "tbxPassword", wsInput.Range("PASS_26").value, "ID"
@@ -2087,6 +2090,9 @@ Public Sub CrownVervePaymentDue()
     drv.AddArgument "--force-device-scale-factor=0.80"
     drv.Start
     On Error GoTo 0
+
+    ' Chrome did not start (usually: Chrome updated, chromedriver is old) - say so in words.
+    If Not CrownChromeOk(drv) Then Exit Sub
 
     drv.Get wsInput.Range("URL_9").value
 

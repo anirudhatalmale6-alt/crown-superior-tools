@@ -51,6 +51,9 @@ Public Sub CrownRecordPolicyPages()
     drv.Start
     On Error GoTo 0
 
+    ' Chrome did not start (usually: Chrome updated, chromedriver is old) - say so in words.
+    If Not CrownChromeOk(drv) Then Exit Sub
+
     If UCase$(Left$(Replace(policyNo, " ", ""), 3)) = "GAF" Then
         ' ----------------------------------------------------- Verve
         drv.Get wsInput.Range("URL_9").value

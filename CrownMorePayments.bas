@@ -69,6 +69,9 @@ Public Sub CrownAssurancePaymentDue()
     drv.Start
     On Error GoTo 0
 
+    ' Chrome did not start (usually: Chrome updated, chromedriver is old) - say so in words.
+    If Not CrownChromeOk(drv) Then Exit Sub
+
     drv.Get wsInput.Range("URL_11").value
 
     ' --- sign in (his PerformLogin, by the boxes' own names) ---------------
@@ -346,6 +349,9 @@ Public Sub CrownTrexisPaymentDue()
     drv.AddArgument "--disable-popup-blocking"
     drv.Start
     On Error GoTo 0
+
+    ' Chrome did not start (usually: Chrome updated, chromedriver is old) - say so in words.
+    If Not CrownChromeOk(drv) Then Exit Sub
 
     drv.Get wsInput.Range("URL_8").value
 
