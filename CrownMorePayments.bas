@@ -34,6 +34,7 @@ Private Const TX_CARRIER As String = "Trexis"
 Private Const PG_CARRIER As String = "Progressive"
 Private Const FA_CARRIER As String = "First Acceptance"
 Private Const NG_CARRIER As String = "National General"
+Private Const NG_SITE As String = "https://natgenagency.com"
 
 
 Public Sub CrownAssurancePaymentDue()
@@ -871,8 +872,8 @@ End Function
 ' ---------------------------------------------------------------------
 ' Alt+F8 > CrownProgressivePaymentDue > Run
 ' Alt+F8 > CrownFirstAcceptancePaymentDue > Run
-' Alt+F8 > CrownNatGenLook > Run   (saves the National General pages I
-'                                    need to build its payment run)
+' Alt+F8 > CrownNatGenPaymentDue > Run
+' Alt+F8 > CrownNatGenLook > Run   (saves National General pages for me)
 '
 ' Each carrier gets its own Chrome profile - a folder under
 ' %LOCALAPPDATA%\CrownSuperior\ - so Chrome remembers the carrier's
@@ -1613,6 +1614,20 @@ End Function
 ' ---------------------------------------------------------------------
 Public Sub CrownNatGenLook()
     Dim drv As ChromeDriver, clsDrv As Chrm
+
+    Set drv = CrownCodeDriver(NG_CARRIER, clsDrv)
+    If Not CrownChromeOk(drv) Then Exit Sub
+
+    If CrownNgSignIn(drv) Then CrownLookPages drv, NG_CARRIER
+
+    On Error Resume Next
+    drv.Quit
+    On Error GoTo 0
+End Sub
+
+' Signs in to National General (his Mod9FillNationalGeneral steps:
+' txtUserID > btnLogin > Password > SIGN IN), getting past the code.
+Private Function CrownNgSignIn(ByVal drv As ChromeDriver) As Boolean
     Dim Keys As New Selenium.Keys
     Dim wsInput As Worksheet
     Dim answer As String, url As String
@@ -1620,18 +1635,16 @@ Public Sub CrownNatGenLook()
 
     Set wsInput = ThisWorkbook.Worksheets("Input")
 
-    Set drv = CrownCodeDriver(NG_CARRIER, clsDrv)
-    If Not CrownChromeOk(drv) Then Exit Sub
-
     url = Trim$(wsInput.Range("URL_30").value)
-    If Len(url) = 0 Then url = "https://natgenagency.com"
+    If Len(url) = 0 Then url = NG_SITE
     drv.Get url
 
-    ' His Mod9FillNationalGeneral sign-in: txtUserID > btnLogin > Password > SIGN IN.
     started = Now
     Do
-        answer = CrownMoreJs(drv, "return document.getElementById('txtUserID')?'user':(document.getElementById('Password')?'pass':'');")
+        answer = CrownMoreJs(drv, "return document.getElementById('txtUserID')?'user':(document.getElementById('Password')?'pass':" & _
+                                  "(document.getElementById('ctl00_lblInsName')||document.querySelector('a[href*=PolicySearch]')?'in':''));")
         If Len(answer) > 0 Then Exit Do
+        If Len(CrownMoreJs(drv, CrownCodePageJs())) > 0 Then Exit Do
         drv.Wait 700
         DoEvents
     Loop While (Now - started) * 86400 < 30
@@ -1647,26 +1660,288 @@ Public Sub CrownNatGenLook()
         EnterData drv, Keys, "Password", wsInput.Range("PASS_30").value, "ID"
         ClickElement drv, "//button[contains(text(),'SIGN IN')]", "XPATH"
         drv.Wait 2500
-    Else
+    ElseIf answer = "" Then
         MsgBox "Please sign in to National General in the Chrome window, then press OK here.", _
                vbInformation, "Crown Superior"
     End If
 
-    If Not CrownCodeWait(drv, NG_CARRIER, _
-            "return (location.hostname.indexOf('login.')!==0&&!document.querySelector('input[type=password]')" & _
-            "&&!document.getElementById('txtUserID'))?'ok':'';", 180) Then
+    CrownNgSignIn = CrownCodeWait(drv, NG_CARRIER, _
+        "return (location.hostname.indexOf('login.')!==0&&!document.querySelector('input[type=password]')" & _
+        "&&!document.getElementById('txtUserID'))?'ok':'';", 180)
+
+    If Not CrownNgSignIn Then
         MsgBox "Did not get past National General's sign-in. Send me a screenshot of what it shows.", _
                vbExclamation, "Crown Superior"
-        GoTo Finish
+    End If
+End Function
+
+
+' ---------------------------------------------------------------------
+' National General payment due - built from the pages Tony saved on
+' 21 Oct. National General has no list of our policies to walk through,
+' so this goes the other way: every National General policy on the
+' website is searched for (Search.aspx, by its number), opened, and its
+' Billing page read - "Next Amount Due", "Amount Due On", Status. The
+' page header must show that policy's number before anything is written.
+' ---------------------------------------------------------------------
+Public Sub CrownNatGenPaymentDue()
+    Dim drv As ChromeDriver, clsDrv As Chrm
+    Dim ws As Object, policies As Collection, parts As Variant
+    Dim recordId As String, siteNo As String, digits As String, base As String, suffix As String
+    Dim insured As String, answer As String, bits() As String, note As String, cancelledOn As String
+    Dim dueAmount As String, dueDate As String, cancelDate As String, status As String, said As String
+    Dim row As Long, done As Long, blank As Long, failed As Long, skipped As Long, notFound As Long
+    Dim signIns As Long
+
+    Set policies = CrownPolicyRows(NG_CARRIER)
+
+    If policies.Count = 0 Then
+        MsgBox "No National General policies came back from the website.", vbExclamation, "Crown Superior"
+        Exit Sub
     End If
 
-    CrownLookPages drv, NG_CARRIER
+    Set ws = CrownCodeSheet("NatGenPayments", "National General")
+    row = 2
+
+    Set drv = CrownCodeDriver(NG_CARRIER, clsDrv)
+    If Not CrownChromeOk(drv) Then Exit Sub
+
+    If Not CrownNgSignIn(drv) Then GoTo Finish
+    signIns = 1
+
+    For Each parts In policies
+        recordId = CStr(parts(0))
+        siteNo = CStr(parts(2))
+        insured = Trim$(CStr(parts(4)) & " " & CStr(parts(5)))
+        dueAmount = "": dueDate = "": cancelDate = "": status = "": said = "": note = ""
+
+        ws.Cells(row, 1).value = recordId
+        ws.Cells(row, 2).value = siteNo
+        ws.Cells(row, 3).value = insured
+        ws.Cells(row, 8).value = Now
+
+        ' National General numbers are 10 digits, then the term ("02").
+        digits = CrownDigits(siteNo)
+        base = Left$(digits, 10)
+        suffix = ""
+        If Len(digits) >= 12 Then suffix = Mid$(digits, 11, 2)
+
+        If Len(digits) < 8 Then
+            ws.Cells(row, 10).value = "no usable policy number on the website - skipped"
+            failed = failed + 1
+            GoTo NextPolicy
+        End If
+
+        If CrownNgLongCancelled(parts, cancelledOn) Then
+            ws.Cells(row, 10).value = "skipped - cancelled since " & cancelledOn
+            skipped = skipped + 1
+            GoTo NextPolicy
+        End If
+
+        answer = CrownNgOpenBilling(drv, base, suffix)
+
+        ' Signed out part way (National General ends sessions): once more.
+        If answer = "signedout" And signIns < 4 Then
+            signIns = signIns + 1
+            If CrownNgSignIn(drv) Then answer = CrownNgOpenBilling(drv, base, suffix)
+        End If
+
+        If Left$(answer, 3) <> "ok|" Then
+            If answer = "none" Then
+                ws.Cells(row, 10).value = "National General found no policy " & base
+                notFound = notFound + 1
+            Else
+                ws.Cells(row, 10).value = "could not open it on National General (" & answer & ") - left as it was"
+                failed = failed + 1
+            End If
+            GoTo NextPolicy
+        End If
+
+        ' ok|next amount|due on|status|status detail|cancel date|header number
+        bits = Split(answer, "|")
+        dueAmount = CrownMoreMoney(bits(1))
+        dueDate = CrownCodeDate(bits(2))
+        status = Trim$(bits(3))
+        cancelDate = CrownCodeDate(bits(5))
+        said = "Next Amount Due " & bits(1) & "; Amount Due On " & bits(2) & "; Status " & bits(3) & _
+               IIf(Len(bits(4)) > 0, " (" & bits(4) & ")", "") & IIf(Len(bits(5)) > 0, "; cancel " & bits(5), "") & _
+               "; term " & bits(6)
+
+        ws.Cells(row, 2).value = siteNo & "  (NG " & bits(6) & ")"
+        ws.Cells(row, 4).value = dueAmount
+        ws.Cells(row, 5).value = dueDate
+        ws.Cells(row, 6).value = cancelDate
+        ws.Cells(row, 7).value = status
+        ws.Cells(row, 9).value = "policy number"
+        ws.Cells(row, 11).value = said
+
+        If Len(dueAmount & dueDate & cancelDate & status) = 0 Then
+            ws.Cells(row, 10).value = "the Billing page showed nothing to read - left as it was"
+            blank = blank + 1
+        Else
+            answer = CrownMoreWrite(recordId, dueAmount, dueDate, cancelDate, status)
+
+            If InStr(1, answer, """ok"":true", vbTextCompare) > 0 Then
+                ws.Cells(row, 10).value = "written"
+                done = done + 1
+            ElseIf Len(Trim$(answer)) = 0 Then
+                ws.Cells(row, 10).value = "the website did not answer - run again for this one"
+                failed = failed + 1
+            Else
+                ws.Cells(row, 10).value = "refused: " & answer
+                failed = failed + 1
+            End If
+        End If
+
+NextPolicy:
+        row = row + 1
+        DoEvents
+    Next parts
 
 Finish:
     On Error Resume Next
     drv.Quit
     On Error GoTo 0
+
+    ws.Columns("A:J").AutoFit
+    ws.Columns("K").ColumnWidth = 60
+    ThisWorkbook.Save
+    ws.Activate
+
+    MsgBox done & " National General policies written to the website." & vbCrLf & _
+           skipped & " skipped - cancelled more than 60 days ago." & vbCrLf & _
+           notFound & " not found on National General." & vbCrLf & _
+           blank & " showed nothing to read - left as they were." & vbCrLf & _
+           failed & " did not go through." & vbCrLf & vbCrLf & _
+           "The NatGenPayments sheet has every one.", vbInformation, "Crown Superior"
 End Sub
+
+' Search for the policy, open it (the term the website names, else the
+' Active one, else the newest), go to Billing and read it.
+' "ok|..." (see CrownNgBillingJs), "none", "signedout" or what went wrong.
+Private Function CrownNgOpenBilling(ByVal drv As ChromeDriver, ByVal base As String, ByVal suffix As String) As String
+    Dim answer As String, started As Date
+
+    drv.Get NG_SITE & "/Search.aspx?q=Policy"
+
+    started = Now
+    Do
+        answer = CrownMoreJs(drv, "return document.getElementById('ctl00_MainContent_txtSearchStr')?'ok':" & _
+                                  "((document.getElementById('txtUserID')||location.hostname.indexOf('login.')===0)?'signedout':'');")
+        If Len(answer) > 0 Then Exit Do
+        drv.Wait 700
+        DoEvents
+    Loop While (Now - started) * 86400 < 30
+
+    If answer <> "ok" Then
+        CrownNgOpenBilling = IIf(answer = "signedout", "signedout", "the search page did not load")
+        Exit Function
+    End If
+
+    CrownMoreJs drv, _
+        "var t=document.getElementById('ctl00_MainContent_txtSearchStr');t.value=arguments[0];" & _
+        "var a=document.getElementById('ctl00_MainContent_ddlAction');if(a)a.value='0';" & _
+        "document.getElementById('ctl00_MainContent_btnSearch').click();return 'ok';", base
+    drv.Wait 1500
+
+    ' The list of terms, or straight onto the policy when there is one.
+    started = Now
+    Do
+        answer = CrownMoreJs(drv, CrownNgPickJs(), suffix)
+        If Len(answer) > 0 Then Exit Do
+        drv.Wait 800
+        DoEvents
+    Loop While (Now - started) * 86400 < 40
+
+    If answer = "none" Or answer = "" Then
+        CrownNgOpenBilling = IIf(answer = "none", "none", "no search answer")
+        Exit Function
+    End If
+
+    ' On the policy (answer "policy", or "clicked" a term): to Billing.
+    If Not CrownMoreWaitJs(drv, "return (/\/Policy\//i.test(location.pathname)&&document.getElementById('ctl00_lblHeaderPageTitleTop'))?'ok':'';", 40) Then
+        CrownNgOpenBilling = "the policy did not open"
+        Exit Function
+    End If
+
+    If Not CrownMoreWaitJs(drv, "return /PolicyBillPlans/i.test(location.pathname)?'ok':'';", 1) Then
+        If CrownMoreJs(drv, "var b=document.querySelector('a[href$=""PolicyBillPlans.aspx""]');if(b){b.click();return 'ok';}return '';") <> "ok" Then
+            drv.Get NG_SITE & "/Policy/PolicyBillPlans.aspx"
+        End If
+    End If
+
+    started = Now
+    Do
+        answer = CrownMoreJs(drv, CrownNgBillingJs())
+        If Left$(answer, 3) = "ok|" Then Exit Do
+        drv.Wait 800
+        DoEvents
+    Loop While (Now - started) * 86400 < 40
+
+    If Left$(answer, 3) <> "ok|" Then
+        CrownNgOpenBilling = "the Billing page did not load"
+        Exit Function
+    End If
+
+    ' The header must be THIS policy - never another customer's figures.
+    If InStr(CrownDigits(Split(answer, "|")(6)), base) <> 1 Then
+        CrownNgOpenBilling = "National General showed policy " & Split(answer, "|")(6) & " instead"
+        Exit Function
+    End If
+
+    CrownNgOpenBilling = answer
+End Function
+
+' On the search results: clicks the right term and answers "clicked";
+' "policy" if National General went straight to the policy; "none" when
+' it found nothing; "" while still loading. arguments[0] = term ("02") or "".
+Private Function CrownNgPickJs() As String
+    CrownNgPickJs = _
+        "if(/\/Policy\//i.test(location.pathname)&&document.getElementById('ctl00_lblHeaderPageTitleTop'))return 'policy';" & _
+        "var ls=[].slice.call(document.querySelectorAll('a[id*=policySearchResultsGrid][id$=btnPolicy]'));" & _
+        "if(!ls.length){var e=(document.getElementById('ctl00_MainContent_lblError')||{}).innerText||'';" & _
+        "var t=document.body?document.body.innerText:'';" & _
+        "return (/no (records|results|policies)|not found|0 records/i.test(e+' '+t)&&document.getElementById('ctl00_MainContent_txtSearchStr'))?'none':'';}" & _
+        "var rows=ls.map(function(a){var tr=a.closest('tr');var td=tr.querySelectorAll('td');" & _
+        "return {a:a,no:a.innerText.replace(/\D/g,''),st:(td[td.length-1]||{}).innerText||''};});" & _
+        "var want=arguments[0],pick=null;" & _
+        "if(want)rows.forEach(function(r){if(r.no.slice(-2)===want)pick=r;});" & _
+        "if(!pick)rows.forEach(function(r){if(!pick&&/active/i.test(r.st))pick=r;});" & _
+        "if(!pick)rows.forEach(function(r){if(!pick||r.no>pick.no)pick=r;});" & _
+        "pick.a.click();return 'clicked';"
+End Function
+
+' "ok|next amount|due on|status|status detail|cancel date|header number".
+Private Function CrownNgBillingJs() As String
+    CrownNgBillingJs = _
+        "var g=function(id){var e=document.getElementById(id);return e?e.innerText.replace(/[|]/g,' ').trim():'';};" & _
+        "if(!/PolicyBillPlans/i.test(location.pathname))return '';" & _
+        "if(!document.getElementById('ctl00_MainContent_InsuredInfo1_lblStatus'))return '';" & _
+        "var t=(document.body.innerText||'').replace(/\s+/g,' ');" & _
+        "var m=t.match(/cancel\w*\s*(?:effective\s*)?(?:date)?\s*:?\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/i);" & _
+        "return 'ok|'+g('ctl00_MainContent_PaymentSummary2_lblNextAmountDue')+'|'+g('ctl00_MainContent_PaymentSummary2_lblAmountDueDate')" & _
+        "+'|'+g('ctl00_MainContent_InsuredInfo1_lblStatus')+'|'+g('ctl00_MainContent_InsuredInfo1_lblStatusDetail')" & _
+        "+'|'+(m?m[1]:'')+'|'+g('ctl00_lblHeaderPageTitleTop');"
+End Function
+
+' Same rule as the United and Verve runs: the website says cancelled AND
+' the cancel date is more than 60 days ago.
+Private Function CrownNgLongCancelled(ByVal parts As Variant, ByRef since As String) As Boolean
+    Dim words As String, cancelledOn As Double
+
+    since = ""
+    If UBound(parts) < 10 Then Exit Function
+
+    words = CStr(parts(6)) & " " & CStr(parts(7))
+    If InStr(1, words, "cancel", vbTextCompare) = 0 And InStr(1, words, "laps", vbTextCompare) = 0 _
+       And InStr(1, words, "cx", vbTextCompare) = 0 Then Exit Function
+
+    cancelledOn = CrownUsDate(CStr(parts(10)))
+    If cancelledOn = 0 Or cancelledOn > CDbl(Date) - 60 Then Exit Function
+
+    since = Trim$(CStr(parts(10)))
+    CrownNgLongCancelled = True
+End Function
 
 ' Saves each page Tony opens (picture + page code) into one folder in
 ' Downloads, until he presses Cancel, then opens the folder.
