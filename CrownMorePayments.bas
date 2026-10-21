@@ -873,7 +873,8 @@ End Function
 ' Alt+F8 > CrownProgressivePaymentDue > Run
 ' Alt+F8 > CrownFirstAcceptancePaymentDue > Run
 ' Alt+F8 > CrownNatGenPaymentDue > Run
-' Alt+F8 > CrownNatGenLook > Run   (saves National General pages for me)
+' Alt+F8 > CrownNatGenLook / CrownProgressiveLook / CrownFirstAcceptanceLook
+'          (save that carrier's pages for me)
 '
 ' Each carrier gets its own Chrome profile - a folder under
 ' %LOCALAPPDATA%\CrownSuperior\ - so Chrome remembers the carrier's
@@ -1172,31 +1173,7 @@ Public Sub CrownProgressivePaymentDue()
     Set drv = CrownCodeDriver(PG_CARRIER, clsDrv)
     If Not CrownChromeOk(drv) Then Exit Sub
 
-    drv.Get wsInput.Range("URL_10").value
-
-    ' Sign in - unless Chrome is still signed in from last time.
-    started = Now
-    Do
-        answer = CrownMoreJs(drv, "return document.getElementById('sbp-search')?'in':(document.getElementById('user1')?'login':'');")
-        If Len(answer) > 0 Then Exit Do
-        If Len(CrownMoreJs(drv, CrownCodePageJs())) > 0 Then Exit Do
-        drv.Wait 700
-        DoEvents
-    Loop While (Now - started) * 86400 < 60
-
-    If answer = "login" Then
-        EnterData drv, Keys, "user1", wsInput.Range("USER_4").value, "ID"
-        EnterData drv, Keys, "password1", wsInput.Range("PASS_4").value, "ID"
-        ClickElement drv, "image1", "ID"
-        drv.Wait 2000
-    End If
-
-    If Not CrownCodeWait(drv, PG_CARRIER, "return document.getElementById('sbp-search')?'ok':'';", 180) Then
-        MsgBox "Did not get to Progressive's policy search, so nothing has been changed." & vbCrLf & _
-               "(If Progressive asked for something other than a code, tell me what it showed.)", _
-               vbExclamation, "Crown Superior"
-        GoTo Finish
-    End If
+    If Not CrownPgSignIn(drv) Then GoTo Finish
 
     If Not CrownPgSearch(drv) Then
         MsgBox "Progressive's list of active policies did not come up, so nothing has been changed.", _
@@ -1277,13 +1254,16 @@ Public Sub CrownProgressivePaymentDue()
             said = ""
             note = ""
 
-            If UBound(titles) = UBound(says) Then
+            If UBound(titles) = 0 Then
+                ' One policy: its payment line is the one that talks about money.
+                said = CrownPgPaymentLine(says)
+            ElseIf UBound(titles) = UBound(says) Then
                 said = Trim$(says(k))
             ElseIf k = 0 Then
-                said = Trim$(says(0))
-                note = "more than one policy on this customer's page - check this one"
+                said = CrownPgPaymentLine(says)
+                note = "Progressive shows " & (UBound(titles) + 1) & " policies for this customer - check the payment belongs to this one"
             Else
-                note = "more than one policy on this customer's page - no payment line read for this one"
+                note = "Progressive shows " & (UBound(titles) + 1) & " policies for this customer - no payment line read for this one"
             End If
             found.Add Array(insured, policyNo, said, note)
             If Len(CrownDigits(policyNo)) > 0 Then listed(CrownDigits(policyNo)) = True
@@ -1334,6 +1314,44 @@ Finish:
     CrownCodeDone ws, PG_CARRIER, "ProgressivePayments", done, unmatched, blank, failed
 End Sub
 
+' Signs in to Progressive (USER_4 / PASS_4 at URL_10), past the code,
+' to the policy search. Says so and answers False when it cannot.
+Private Function CrownPgSignIn(ByVal drv As ChromeDriver) As Boolean
+    Dim Keys As New Selenium.Keys
+    Dim wsInput As Worksheet
+    Dim answer As String, started As Date
+
+    Set wsInput = ThisWorkbook.Worksheets("Input")
+
+    drv.Get wsInput.Range("URL_10").value
+
+    ' Sign in - unless Chrome is still signed in from last time.
+    started = Now
+    Do
+        answer = CrownMoreJs(drv, "return document.getElementById('sbp-search')?'in':(document.getElementById('user1')?'login':'');")
+        If Len(answer) > 0 Then Exit Do
+        If Len(CrownMoreJs(drv, CrownCodePageJs())) > 0 Then Exit Do
+        drv.Wait 700
+        DoEvents
+    Loop While (Now - started) * 86400 < 60
+
+    If answer = "login" Then
+        EnterData drv, Keys, "user1", wsInput.Range("USER_4").value, "ID"
+        EnterData drv, Keys, "password1", wsInput.Range("PASS_4").value, "ID"
+        ClickElement drv, "image1", "ID"
+        drv.Wait 2000
+    End If
+
+    If Not CrownCodeWait(drv, PG_CARRIER, "return document.getElementById('sbp-search')?'ok':'';", 180) Then
+        MsgBox "Did not get to Progressive's policy search, so nothing has been changed." & vbCrLf & _
+               "(If Progressive asked for something other than a code, tell me what it showed.)", _
+               vbExclamation, "Crown Superior"
+        Exit Function
+    End If
+
+    CrownPgSignIn = True
+End Function
+
 ' "Active Policies" and Search, then wait for the list (or "no results").
 Private Function CrownPgSearch(ByVal drv As ChromeDriver) As Boolean
     CrownMoreJs drv, _
@@ -1375,6 +1393,22 @@ Private Function CrownPgDetailJs() As String
         "if(!ti.length)return '';" & _
         "var cs=[].slice.call(document.querySelectorAll('div.CSPItem')).map(function(e){return e.innerText.replace(/\s+/g,' ').replace(/[|~]/g,' ').trim();});" & _
         "return 'ok|'+ti.join('~')+'|'+cs.join('~');"
+End Function
+
+' The line that says what is due ("$183.01 due ...", "will be
+' withdrawn", "No payment is due"), else the first one.
+Private Function CrownPgPaymentLine(ByRef says() As String) As String
+    Dim k As Long
+
+    For k = 0 To UBound(says)
+        If InStr(says(k), "$") > 0 Or InStr(1, says(k), "payment is due", vbTextCompare) > 0 Or _
+           InStr(1, says(k), "paid in full", vbTextCompare) > 0 Then
+            CrownPgPaymentLine = Trim$(says(k))
+            Exit Function
+        End If
+    Next k
+
+    CrownPgPaymentLine = Trim$(says(0))
 End Function
 
 ' "Policy 123456789, Auto ..." -> "123456789" (his rule: the last word
@@ -1447,38 +1481,7 @@ Public Sub CrownFirstAcceptancePaymentDue()
     Set drv = CrownCodeDriver(FA_CARRIER, clsDrv)
     If Not CrownChromeOk(drv) Then Exit Sub
 
-    drv.Get wsInput.Range("URL_31").value
-
-    started = Now
-    Do
-        answer = CrownMoreJs(drv, "return document.getElementById('v-3')?'login':(document.querySelector('iframe')?'in':'');")
-        If Len(answer) > 0 Then Exit Do
-        If Len(CrownMoreJs(drv, CrownCodePageJs())) > 0 Then Exit Do
-        drv.Wait 700
-        DoEvents
-    Loop While (Now - started) * 86400 < 60
-
-    If answer = "login" Then
-        EnterData drv, Keys, "v-3", wsInput.Range("USER_25").value, "ID"
-        EnterData drv, Keys, "v-7", wsInput.Range("PASS_25").value, "ID"
-        drv.Keyboard.SendKeys Keys.Enter
-        drv.Wait 3000
-    End If
-
-    ' Signed in = the sign-in boxes have gone and the Action Hub ("Policy
-    ' Services") is showing - on the page itself or inside its frame.
-    ' (21 Oct: the first version also wanted no box to type in, but the
-    ' Action Hub has its own Search box, so it never counted as signed in.)
-    If Not CrownCodeWait(drv, FA_CARRIER, _
-            "if(document.getElementById('v-7'))return '';var hub=function(d){try{return /Policy Services|Action Hub/i.test(d.body.innerText);}catch(e){return false;}};" & _
-            "if(hub(document))return 'ok';var fs=document.querySelectorAll('iframe');" & _
-            "for(var k=0;k<fs.length;k++){try{if(hub(fs[k].contentDocument))return 'ok';}catch(e){}}" & _
-            "return (fs.length&&/apps\/portal/i.test(location.href)&&!/verification|one-time|passcode|security code/i.test(document.body.innerText))?'ok':'';", 180) Then
-        MsgBox "Did not get past First Acceptance's sign-in, so nothing has been changed." & vbCrLf & _
-               "(If it asked for something other than a code, send me a screenshot of it.)", _
-               vbExclamation, "Crown Superior"
-        GoTo Finish
-    End If
+    If Not CrownFaSignIn(drv) Then GoTo Finish
 
     drv.Wait 2000
 
@@ -1561,6 +1564,80 @@ Finish:
     On Error GoTo 0
 
     CrownCodeDone ws, FA_CARRIER, "FirstAcceptancePayments", done, unmatched, blank, failed
+End Sub
+
+' Signs in to First Acceptance (USER_25 / PASS_25 at URL_31), past the
+' code, to the Action Hub. Says so and answers False when it cannot.
+Private Function CrownFaSignIn(ByVal drv As ChromeDriver) As Boolean
+    Dim Keys As New Selenium.Keys
+    Dim wsInput As Worksheet
+    Dim answer As String, started As Date
+
+    Set wsInput = ThisWorkbook.Worksheets("Input")
+
+    drv.Get wsInput.Range("URL_31").value
+
+    started = Now
+    Do
+        answer = CrownMoreJs(drv, "return document.getElementById('v-3')?'login':(document.querySelector('iframe')?'in':'');")
+        If Len(answer) > 0 Then Exit Do
+        If Len(CrownMoreJs(drv, CrownCodePageJs())) > 0 Then Exit Do
+        drv.Wait 700
+        DoEvents
+    Loop While (Now - started) * 86400 < 60
+
+    If answer = "login" Then
+        EnterData drv, Keys, "v-3", wsInput.Range("USER_25").value, "ID"
+        EnterData drv, Keys, "v-7", wsInput.Range("PASS_25").value, "ID"
+        drv.Keyboard.SendKeys Keys.Enter
+        drv.Wait 3000
+    End If
+
+    ' Signed in = the sign-in boxes have gone and the Action Hub ("Policy
+    ' Services") is showing - on the page itself or inside its frame.
+    ' (21 Oct: the first version also wanted no box to type in, but the
+    ' Action Hub has its own Search box, so it never counted as signed in.)
+    If Not CrownCodeWait(drv, FA_CARRIER, _
+            "if(document.getElementById('v-7'))return '';var hub=function(d){try{return /Policy Services|Action Hub/i.test(d.body.innerText);}catch(e){return false;}};" & _
+            "if(hub(document))return 'ok';var fs=document.querySelectorAll('iframe');" & _
+            "for(var k=0;k<fs.length;k++){try{if(hub(fs[k].contentDocument))return 'ok';}catch(e){}}" & _
+            "return (fs.length&&/apps\/portal/i.test(location.href)&&!/verification|one-time|passcode|security code/i.test(document.body.innerText))?'ok':'';", 180) Then
+        MsgBox "Did not get past First Acceptance's sign-in, so nothing has been changed." & vbCrLf & _
+               "(If it asked for something other than a code, send me a screenshot of it.)", _
+               vbExclamation, "Crown Superior"
+        Exit Function
+    End If
+
+    CrownFaSignIn = True
+End Function
+
+' The pages a "pull into Edit Data" would read, saved for me - same as
+' CrownNatGenLook. Open a customer's policy pages (drivers, vehicles,
+' coverages, lienholder) and press OK on each.
+Public Sub CrownProgressiveLook()
+    Dim drv As ChromeDriver, clsDrv As Chrm
+
+    Set drv = CrownCodeDriver(PG_CARRIER, clsDrv)
+    If Not CrownChromeOk(drv) Then Exit Sub
+
+    If CrownPgSignIn(drv) Then CrownLookPages drv, PG_CARRIER
+
+    On Error Resume Next
+    drv.Quit
+    On Error GoTo 0
+End Sub
+
+Public Sub CrownFirstAcceptanceLook()
+    Dim drv As ChromeDriver, clsDrv As Chrm
+
+    Set drv = CrownCodeDriver(FA_CARRIER, clsDrv)
+    If Not CrownChromeOk(drv) Then Exit Sub
+
+    If CrownFaSignIn(drv) Then CrownLookPages drv, FA_CARRIER
+
+    On Error Resume Next
+    drv.Quit
+    On Error GoTo 0
 End Sub
 
 ' Leaves the driver in the page or frame that has the element.
@@ -1996,10 +2073,9 @@ Private Sub CrownLookPages(ByVal drv As ChromeDriver, ByVal carrier As String)
 
     Do
         If MsgBox("Signed in to " & carrier & "." & vbCrLf & vbCrLf & _
-                  "In the Chrome window, open the page I should see, then press OK here to save it:" & vbCrLf & _
-                  "  1. the list or search of your policies" & vbCrLf & _
-                  "  2. one policy's page that shows the amount due, due date and cancel date" & vbCrLf & _
-                  "  3. anything else that has payment information" & vbCrLf & vbCrLf & _
+                  "In the Chrome window, open each page I asked for, then press OK here to save it" & vbCrLf & _
+                  "(one customer's policy pages: drivers, vehicles, coverages / deductibles," & vbCrLf & _
+                  "lienholder, and the page with the amount due and due date)." & vbCrLf & vbCrLf & _
                   "Pages saved so far: " & k & ". Press Cancel when you are finished.", _
                   vbOKCancel + vbInformation, "Crown Superior - " & carrier) = vbCancel Then Exit Do
 
