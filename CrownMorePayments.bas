@@ -1641,7 +1641,7 @@ Public Sub CrownFirstAcceptanceLook()
 End Sub
 
 ' Leaves the driver in the page or frame that has the element.
-Private Function CrownFaFindFrame(ByVal drv As ChromeDriver, ByVal xp As String, ByVal seconds As Long) As Boolean
+Public Function CrownFaFindFrame(ByVal drv As ChromeDriver, ByVal xp As String, ByVal seconds As Long) As Boolean
     Dim started As Date, i As Long, n As Long
 
     started = Now
@@ -1679,7 +1679,7 @@ Private Function CrownFaFindFrame(ByVal drv As ChromeDriver, ByVal xp As String,
     Loop While (Now - started) * 86400 < seconds
 End Function
 
-Private Function CrownFaWaitX(ByVal drv As ChromeDriver, ByVal xp As String, ByVal seconds As Long) As Boolean
+Public Function CrownFaWaitX(ByVal drv As ChromeDriver, ByVal xp As String, ByVal seconds As Long) As Boolean
     Dim started As Date
 
     started = Now
@@ -1700,7 +1700,7 @@ Private Function CrownFaText(ByVal drv As ChromeDriver, ByVal xp As String) As S
 End Function
 
 ' Click (when it is there) and let First Acceptance's spinner finish.
-Private Sub CrownFaClick(ByVal drv As ChromeDriver, ByVal xp As String)
+Public Sub CrownFaClick(ByVal drv As ChromeDriver, ByVal xp As String)
     If CrownFaWaitX(drv, xp, 20) Then
         On Error Resume Next
         drv.ExecuteScript "arguments[0].scrollIntoView({block:'center'});", drv.FindElementByXPath(xp)

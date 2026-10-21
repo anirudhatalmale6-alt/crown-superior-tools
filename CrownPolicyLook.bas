@@ -447,9 +447,11 @@ Private Sub CrownPullApply(ByVal answer As String, ByVal policyNo As String, ByV
     Dim drivers As Collection, vehicles As Collection, covers As Collection, liens As Collection
     Dim insured As Variant, addr As Variant, k As Long, row As Long, shown As String, n As Long
     Dim dCols As Variant, vCols As Variant, col As String, item As Variant
+    Dim vNames As Collection, vn As Variant, w() As String
 
     Set wsEdit = ThisWorkbook.Worksheets("Edit Data")
     mPullBlank = newRow
+    Set vNames = New Collection
 
     ' --- what the carrier says -------------------------------------------------
     Set drivers = New Collection: Set vehicles = New Collection
@@ -470,6 +472,7 @@ Private Sub CrownPullApply(ByVal answer As String, ByVal policyNo As String, ByV
             Case "COV": covers.Add f
             Case "LIEN": liens.Add f
             Case "ADDR": addr = f
+            Case "VEHNAME": vNames.Add f
         End Select
     Next k
 
@@ -539,6 +542,14 @@ Private Sub CrownPullApply(ByVal answer As String, ByVal policyNo As String, ByV
 
         item = vehicles(k)
         col = vCols(k - 1)
+
+        ' The full make where another page spells it out ("DODG" -> "DODGE").
+        For Each vn In vNames
+            w = Split(Application.WorksheetFunction.Trim(CStr(vn(2))), " ")
+            If UBound(w) >= 2 Then
+                If w(0) = CStr(item(2)) And InStr(1, CStr(vn(2)), CStr(item(4)), vbTextCompare) > 0 Then item(3) = w(1)
+            End If
+        Next vn
 
         If k > 1 Then CrownPullAdd changes, wsEdit, col & "16", "Vehicle " & k & " - is there a vehicle", "Yes"
         CrownPullAdd changes, wsEdit, col & "17", "Vehicle " & k & " - VIN", UCase$(CStr(item(1)))
@@ -811,23 +822,11 @@ Public Sub CrownPullProgressivePolicy()
     digits = CrownDigits(policyNo)
     If Len(digits) < 6 Then Exit Sub
 
-    who = Trim$(wsEdit.Range("D18").Text & " " & wsEdit.Range("D19").Text)
-
-    If Val(wsEdit.Range("C5").value) >= 2 And CrownDigits(wsEdit.Range("C7").Text) = digits Then
-        newRow = False
-    Else
-        how = MsgBox("Is " & digits & " a NEW customer for Excel?" & vbCrLf & vbCrLf & _
-                     "Yes = start a new Edit Data row for it" & vbCrLf & _
-                     "No = put it on the customer open on Edit Data now" & IIf(Len(who) > 0, " (" & who & ")", "") & vbCrLf & _
-                     "Cancel = stop", vbYesNoCancel + vbQuestion, "Crown Superior")
-        If how = vbCancel Then Exit Sub
-        newRow = (how = vbYes)
-
-        If Not newRow And Val(wsEdit.Range("C5").value) < 2 Then
-            MsgBox "Open the customer on Edit Data first (their row number in C5), then run this again.", vbExclamation, "Crown Superior"
-            Exit Sub
-        End If
-    End If
+    Select Case CrownPullWhichRow(wsEdit, digits)
+        Case 0: newRow = False
+        Case 1: newRow = True
+        Case Else: Exit Sub
+    End Select
 
     Set drv = CrownCodeDriver("Progressive", clsDrv)
     If Not CrownChromeOk(drv) Then Exit Sub
@@ -948,4 +947,184 @@ Private Function CrownPgPullJs() As String
         "out.push('PAY|'+c(pay));return out.join('\n');"
 
     CrownPgPullJs = s
+End Function
+
+' 0 = the customer open on Edit Data, 1 = a new row, -1 = stop.
+Private Function CrownPullWhichRow(ByVal wsEdit As Worksheet, ByVal digits As String) As Long
+    Dim who As String, how As VbMsgBoxResult
+
+    If Val(wsEdit.Range("C5").value) >= 2 And CrownDigits(wsEdit.Range("C7").Text) = digits Then
+        CrownPullWhichRow = 0
+        Exit Function
+    End If
+
+    who = Trim$(wsEdit.Range("D18").Text & " " & wsEdit.Range("D19").Text)
+    how = MsgBox("Is " & digits & " a NEW customer for Excel?" & vbCrLf & vbCrLf & _
+                 "Yes = start a new Edit Data row for it" & vbCrLf & _
+                 "No = put it on the customer open on Edit Data now" & IIf(Len(who) > 0, " (" & who & ")", "") & vbCrLf & _
+                 "Cancel = stop", vbYesNoCancel + vbQuestion, "Crown Superior")
+
+    If how = vbCancel Then
+        CrownPullWhichRow = -1
+    ElseIf how = vbYes Then
+        CrownPullWhichRow = 1
+    ElseIf Val(wsEdit.Range("C5").value) < 2 Then
+        MsgBox "Open the customer on Edit Data first (their row number in C5), then run this again.", vbExclamation, "Crown Superior"
+        CrownPullWhichRow = -1
+    Else
+        CrownPullWhichRow = 0
+    End If
+End Function
+
+
+' =====================================================================
+' Pull a First Acceptance policy into Edit Data
+' ---------------------------------------------------------------------
+' Alt+F8 > CrownPullFirstAcceptancePolicy > Run, type the policy number
+' (like IAGA-17304). Signs in like the payment run, opens the policy from
+' Open Search, and reads its tabs - Policy Summary (name, phone, email,
+' address), Drivers (date of birth, gender, marital status, license and
+' state, excluded or not), Vehicles (VIN, lienholder) and Coverages (each
+' vehicle's collision / comprehensive deductible). Then the same compare
+' and apply as the other pulls.
+' =====================================================================
+Public Sub CrownPullFirstAcceptancePolicy()
+    Dim wsEdit As Worksheet
+    Dim drv As ChromeDriver, clsDrv As Chrm
+    Dim Keys As New Selenium.Keys
+    Dim policyNo As String, digits As String, answer As String, got As String
+    Dim newRow As Boolean, tabName As Variant, xp As String
+    Dim started As Date
+
+    Set wsEdit = ThisWorkbook.Worksheets("Edit Data")
+
+    policyNo = UCase$(Trim$(InputBox("First Acceptance policy number to pull into Edit Data (like IAGA-17304):", "Crown Superior", _
+                              IIf(InStr(1, wsEdit.Range("H7").Text, "first acceptance", vbTextCompare) > 0, Trim$(wsEdit.Range("C7").Text), ""))))
+    digits = CrownDigits(policyNo)
+    If Len(digits) < 3 Then Exit Sub
+
+    Select Case CrownPullWhichRow(wsEdit, digits)
+        Case 0: newRow = False
+        Case 1: newRow = True
+        Case Else: Exit Sub
+    End Select
+
+    Set drv = CrownCodeDriver("First Acceptance", clsDrv)
+    If Not CrownChromeOk(drv) Then Exit Sub
+    If Not CrownFaSignIn(drv) Then GoTo Finish
+
+    ' His payment-run way in: Policy Services > Active & Reinstatable >
+    ' open the first one, which brings up Open Search.
+    xp = "//div[contains(@class, 'aspect-square') and contains(., 'Policy Services')]"
+    If Not CrownFaFindFrame(drv, xp, 60) Then
+        MsgBox "First Acceptance's Policy Services tile did not show up, so nothing has been changed.", vbExclamation, "Crown Superior"
+        GoTo Finish
+    End If
+
+    CrownFaClick drv, xp
+    CrownFaClick drv, "//button[contains(., 'Active & Reinstatable Policies')]"
+    CrownFaClick drv, "//table/tbody/tr[1]/td[2]//button"
+    CrownFaClick drv, "//button[.//span[text()='Open Search']]"
+
+    ' Type the number into the search box, then open that policy.
+    answer = CrownPullJs(drv, _
+        "var d=document.querySelector('[data-component=x-policy-search-dialog]')||document;" & _
+        "var i=[].slice.call(d.querySelectorAll('input')).filter(function(x){var r=x.getBoundingClientRect();return x.type!=='hidden'&&r.width>0;})[0];" & _
+        "if(!i)return 'nobox';[].slice.call(document.querySelectorAll('[data-crown-q]')).forEach(function(e){e.removeAttribute('data-crown-q');});i.setAttribute('data-crown-q','1');return 'ok';")
+
+    If answer = "ok" Then
+        On Error Resume Next
+        drv.FindElementByCss("[data-crown-q]").Clear
+        drv.FindElementByCss("[data-crown-q]").SendKeys policyNo
+        drv.FindElementByCss("[data-crown-q]").SendKeys Keys.Enter
+        On Error GoTo 0
+        drv.Wait 2500
+        WaitSpinnerGone drv
+    End If
+
+    xp = "//div[@data-component='x-policy-search-dialog']//table/tbody/tr/td[2]//button[translate(normalize-space(.),'abcdefghijklmnopqrstuvwxyz','ABCDEFGHIJKLMNOPQRSTUVWXYZ')='" & policyNo & "']"
+
+    If Not CrownFaWaitX(drv, xp, 25) Then
+        MsgBox "First Acceptance's search did not show policy " & policyNo & ", so nothing has been changed." & vbCrLf & _
+               "(Check the number. Only policies First Acceptance lists under Open Search can be pulled.)", vbExclamation, "Crown Superior"
+        GoTo Finish
+    End If
+
+    CrownFaClick drv, xp
+
+    If Not CrownFaWaitX(drv, "//span[contains(text(),'Policy Status')]", 30) Then
+        MsgBox "Policy " & policyNo & " did not open on First Acceptance, so nothing has been changed.", vbExclamation, "Crown Superior"
+        GoTo Finish
+    End If
+
+    ' Each tab in turn, read while it is showing.
+    For Each tabName In Array("Policy Summary", "Drivers", "Vehicles", "Coverages")
+        CrownPullJs drv, "var n=arguments[0];var b=[].slice.call(document.querySelectorAll('button')).filter(function(x){return (x.innerText||'').trim()===n;})[0];if(b)b.click();return b?'ok':'';", CStr(tabName)
+        drv.Wait 2000
+        WaitSpinnerGone drv
+
+        If tabName = "Policy Summary" Then
+            ' Open the Addresses section so the street and city are in the text.
+            CrownPullJs drv, "var a=[].slice.call(document.querySelectorAll('span,button,div')).filter(function(x){return x.children.length<3&&(x.innerText||'').trim()==='Addresses';})[0];" & _
+                             "if(a){var t=a.closest('[class*=disclosure-trigger],button')||a;t.click();}return 'ok';"
+            drv.Wait 1200
+        End If
+
+        answer = CrownPullJs(drv, CrownFaPullJs(), CStr(tabName))
+        If Len(answer) > 0 Then got = got & answer & vbLf
+    Next tabName
+
+    On Error Resume Next
+    drv.Quit
+    On Error GoTo 0
+
+    If InStr(got, "DRV|") = 0 And InStr(got, "VEH|") = 0 Then
+        MsgBox "Could not read the drivers or vehicles for " & policyNo & " on First Acceptance, so nothing has been changed.", _
+               vbExclamation, "Crown Superior"
+        Exit Sub
+    End If
+
+    CrownPullApply got, policyNo, "First Acceptance", newRow
+    Exit Sub
+
+Finish:
+    On Error Resume Next
+    drv.Quit
+End Sub
+
+' One tab of a First Acceptance policy (arguments[0] = the tab) -> lines.
+Private Function CrownFaPullJs() As String
+    Dim s As String
+
+    s = "var tab=arguments[0];var L=(document.body.innerText||'').split('\n').map(function(x){return x.replace(/\s+/g,' ').trim();}).filter(function(x){return x;});" & _
+        "var c=function(x){return (x||'').replace(/[|]/g,' ').trim();};var lab=function(x){return /:$/.test(x||'');};" & _
+        "var after=function(i){var v=L[i+1]||'';return lab(v)?'':v;};var out=[];" & _
+        "var pi=-1;for(var i=0;i<L.length;i++){if(/^[A-Z]{2,6}-\d{3,}$/.test(L[i])){pi=i;break;}}var pol=pi>=0?L[pi]:'',who=pi>0?L[pi-1]:'';" & _
+        "var st='';for(var i=0;i<L.length;i++){if(L[i]==='Policy Status'){st=L[i+1]||'';break;}}"
+    s = s & _
+        "if(tab==='Policy Summary'){var ph='',em='';for(var i=0;i<L.length;i++){if(/^(Home|Mobile|Cell|Work|Primary) Phone:$/i.test(L[i])&&!ph)ph=after(i);if(/^Email( Address)?:$/i.test(L[i]))em=after(i);}" & _
+        "var a0=-1;for(var i=0;i<L.length;i++)if(L[i]==='Addresses'){a0=i;break;}var street='',city='',sta='',zip='';" & _
+        "if(a0>=0){for(var i=a0+1;i<Math.min(L.length,a0+14);i++){var m=L[i].match(/^(.*?)\s*,\s*([A-Z]{2})\s+(\d{5})/);if(m&&!/LAWRENCEVILLE HWY|TUCKER/i.test(L[i])){city=m[1];sta=m[2];zip=m[3];street=/\d/.test(L[i-1]||'')?L[i-1]:'';break;}}}" & _
+        "out.push('INS|'+[c(who),c(street+(street?', ':'')+city+' '+sta+' '+zip),c(ph),c(em).toLowerCase(),c(st),c(pol),''].join('|'));" & _
+        "if(city)out.push('ADDR|'+[c(street),c(city),c(sta),c(zip)].join('|'));}"
+    s = s & _
+        "if(tab==='Drivers'){for(var i=1;i<L.length;i++){if(L[i]!=='Date Of Birth:')continue;var nm=L[i-1],v={};" & _
+        "for(var k=i;k<L.length&&!/^Violations/.test(L[k]);k++){if(lab(L[k]))v[L[k].replace(/:$/,'').toLowerCase()]=after(k);}" & _
+        "var g=(v['gender']||'').toUpperCase(),ms=(v['marital status']||'').toUpperCase(),dl=(v['dl number']||'').trim(),ls='',lic=dl;" & _
+        "var dm=dl.match(/^([A-Z]{2})\s+(\S+)$/);if(dm){ls=dm[1];lic=dm[2];}" & _
+        "out.push('DRV|'+[c(nm),c(v['date of birth']),g==='F'?'Female':(g==='M'?'Male':c(v['gender'])),ms==='M'?'Married':(ms?'Single':''),c(lic),c(ls),c(v['driver type']),''].join('|'));}}"
+    s = s & _
+        "if(tab==='Vehicles'){for(var i=1;i<L.length;i++){var vm=L[i].match(/^VIN:\s*([A-HJ-NPR-Z0-9]{17})$/i);if(!vm)continue;" & _
+        "var ym=(L[i-1]||'').match(/^(\d{4})\s+(\S+)\s+(.+)$/)||['','','',''];out.push('VEH|'+[vm[1].toUpperCase(),ym[1],c(ym[2]),c(ym[3]),''].join('|'));" & _
+        "for(var k=i;k<Math.min(L.length,i+30);k++){if(L[k]==='Lienholder:'){var lh=after(k);if(lh&&!/^n\/?a$/i.test(lh))out.push('LIEN|'+c(lh)+'|');break;}if(k>i&&/^VIN:/.test(L[k]))break;}}}"
+    s = s & _
+        "if(tab==='Coverages'){var n=0;[].slice.call(document.querySelectorAll('table')).forEach(function(t){var h=[].slice.call(t.querySelectorAll('th')).map(function(x){return (x.innerText||'').trim();});" & _
+        "var di=h.indexOf('Deductible');if(di<0||h.indexOf('Coverage Type')<0)return;n++;" & _
+        "var hd='';var e=t;for(var u=0;u<8&&e&&!hd;u++){var p=e.previousElementSibling;while(p&&!hd){var tx=(p.innerText||'').trim();var mm=tx.match(/(\d{4}\s+[A-Z][A-Z0-9\-]*\s+[^\n]+)/);if(mm)hd=mm[1];p=p.previousElementSibling;}e=e.parentElement;}" & _
+        "var coll='',comp='';[].slice.call(t.querySelectorAll('tbody tr')).forEach(function(r){var cs=[].slice.call(r.children).map(function(x){return (x.innerText||'').trim();});var ty=cs.join(' ').toUpperCase();" & _
+        "var d=(cs[di]||'').replace(/[^0-9]/g,'');if(/COLLISION/.test(ty))coll=d||'0';else if(/COMPREHENSIVE|OTHER THAN COLL/.test(ty))comp=d||'0';});" & _
+        "out.push('COV|'+n+'|'+coll+'|'+comp);if(hd)out.push('VEHNAME|'+n+'|'+c(hd));});}"
+    s = s & "return out.join('\n');"
+
+    CrownFaPullJs = s
 End Function
