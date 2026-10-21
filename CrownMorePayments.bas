@@ -6,6 +6,8 @@ Option Explicit
 ' ---------------------------------------------------------------------
 ' Alt+F8 > CrownAssurancePaymentDue > Run
 ' Alt+F8 > CrownTrexisPaymentDue > Run    (further down)
+' Progressive, First Acceptance, National General: at the end - they ask
+' for a verification code when signing in.
 '
 ' Same idea as the United and Verve runs: each policy's amount due, due
 ' date, cancel date and status go straight onto the website, one policy at
@@ -29,6 +31,9 @@ Option Explicit
 Private Const AA_CARRIER As String = "Assurance America"
 Private Const AA_LIST_WAIT_SECONDS As Long = 120
 Private Const TX_CARRIER As String = "Trexis"
+Private Const PG_CARRIER As String = "Progressive"
+Private Const FA_CARRIER As String = "First Acceptance"
+Private Const NG_CARRIER As String = "National General"
 
 
 Public Sub CrownAssurancePaymentDue()
@@ -858,3 +863,858 @@ Private Function CrownMoreJs(ByVal drv As Object, ByVal script As String, Option
     If IsNull(answer) Or IsEmpty(answer) Then answer = ""
     CrownMoreJs = CStr(answer)
 End Function
+
+
+' =====================================================================
+' Carriers that ask for a verification code: Progressive, First
+' Acceptance, National General
+' ---------------------------------------------------------------------
+' Alt+F8 > CrownProgressivePaymentDue > Run
+' Alt+F8 > CrownFirstAcceptancePaymentDue > Run
+' Alt+F8 > CrownNatGenLook > Run   (saves the National General pages I
+'                                    need to build its payment run)
+'
+' Each carrier gets its own Chrome profile - a folder under
+' %LOCALAPPDATA%\CrownSuperior\ - so Chrome remembers the carrier's
+' "don't ask again on this device" between runs and the code is asked for
+' far less often. When a code IS asked for, the run stops, a box asks for
+' the code that was just texted or emailed, types it in (and ticks
+' "don't ask again" when there is one) and carries on.
+' =====================================================================
+
+' A Chrome that keeps its cookies between runs, one folder per carrier.
+Private Function CrownCodeDriver(ByVal carrier As String, ByRef clsDrv As Chrm) As ChromeDriver
+    Dim folder As String
+
+    folder = Environ$("LOCALAPPDATA") & "\CrownSuperior"
+    On Error Resume Next
+    MkDir folder
+    folder = folder & "\Chrome-" & Replace(carrier, " ", "")
+    MkDir folder
+    On Error GoTo 0
+
+    Dim d As ChromeDriver
+
+    Set clsDrv = New Chrm
+    Set clsDrv.ChrmDriver = New ChromeDriver
+    Set d = clsDrv.ChrmDriver
+
+    On Error Resume Next
+    d.AddArgument "--user-data-dir=" & folder
+    d.AddArgument "--force-device-scale-factor=0.70"
+    d.Start
+    On Error GoTo 0
+
+    Set CrownCodeDriver = d
+End Function
+
+' Waits (up to the seconds given) for readyJs to answer "ok", getting past
+' a verification code on the way if the carrier asks for one. False when
+' it never got there, or Tony pressed Cancel.
+Private Function CrownCodeWait(ByVal drv As ChromeDriver, ByVal carrier As String, _
+                               ByVal readyJs As String, ByVal seconds As Long) As Boolean
+    Dim started As Date, answer As String, typed As String, hint As String
+    Dim tries As Long, how As VbMsgBoxResult
+
+    started = Now
+
+    Do
+        If CrownMoreJs(drv, readyJs) = "ok" Then
+            CrownCodeWait = True
+            Exit Function
+        End If
+
+        answer = CrownMoreJs(drv, CrownCodePageJs())
+
+        If answer = "choose" Then
+            how = MsgBox(carrier & " wants to send you a verification code." & vbCrLf & vbCrLf & _
+                         "Yes = send it by TEXT message" & vbCrLf & _
+                         "No = send it by EMAIL" & vbCrLf & _
+                         "Cancel = stop the run", vbYesNoCancel + vbQuestion, "Crown Superior")
+            If how = vbCancel Then Exit Function
+
+            If CrownMoreJs(drv, CrownCodeChooseJs(), IIf(how = vbYes, "text", "email")) <> "ok" Then
+                MsgBox "Please click how you want the code sent in the " & carrier & " window, then press OK here.", _
+                       vbInformation, "Crown Superior"
+            End If
+
+            drv.Wait 3000
+            started = Now
+
+        ElseIf Left$(answer, 5) = "code|" Then
+            tries = tries + 1
+
+            If tries > 3 Then
+                MsgBox carrier & " did not take the code three times, so the run has stopped." & vbCrLf & _
+                       "Nothing has been changed on the website.", vbExclamation, "Crown Superior"
+                Exit Function
+            End If
+
+            hint = Left$(Mid$(answer, 6), 200)
+            typed = Trim$(InputBox(carrier & " has sent you a verification code." & vbCrLf & hint & vbCrLf & vbCrLf & _
+                                   IIf(tries > 1, "That code was not accepted - check it and type it again." & vbCrLf & vbCrLf, "") & _
+                                   "Type the code here and press OK (Cancel stops the run):", _
+                                   "Crown Superior - " & carrier & " code"))
+            If Len(typed) = 0 Then Exit Function
+
+            On Error Resume Next
+            drv.FindElementByCss("[data-crown-code]").Clear
+            drv.FindElementByCss("[data-crown-code]").SendKeys typed
+            On Error GoTo 0
+
+            CrownMoreJs drv, CrownCodeSubmitJs()
+
+            ' Give the carrier time to move on before looking again, so a slow
+            ' page is not taken for a wrong code.
+            Dim waited As Date
+            waited = Now
+            Do
+                drv.Wait 1000
+                DoEvents
+                If CrownMoreJs(drv, readyJs) = "ok" Then Exit Do
+                If Left$(CrownMoreJs(drv, CrownCodePageJs()), 5) <> "code|" Then Exit Do
+            Loop While (Now - waited) * 86400 < 15
+
+            started = Now
+        End If
+
+        drv.Wait 800
+        DoEvents
+    Loop While (Now - started) * 86400 < seconds
+End Function
+
+' "choose" on a "how should we send the code" page; "code|<what the page
+' says>" on a page asking for the code (the box gets data-crown-code);
+' "" otherwise.
+Private Function CrownCodePageJs() As String
+    CrownCodePageJs = _
+        "var vis=function(e){if(!e)return false;var r=e.getBoundingClientRect(),s=getComputedStyle(e);" & _
+        "return r.width>0&&r.height>0&&s.visibility!=='hidden'&&s.display!=='none';};" & _
+        "var t=(document.body?document.body.innerText:'').replace(/\s+/g,' ');" & _
+        "if(/choose a multi.?factor contact method/i.test(t))return 'choose';" & _
+        "var ins=[].slice.call(document.querySelectorAll('input')).filter(function(i){" & _
+        "var ty=(i.getAttribute('type')||'text').toLowerCase();return vis(i)&&['text','tel','number','password'].indexOf(ty)>=0;});" & _
+        "var labelOf=function(i){var l='';[].slice.call(document.querySelectorAll('label')).forEach(function(x){if(i.id&&x.htmlFor===i.id)l+=' '+x.innerText;});return l;};" & _
+        "var c=null;for(var k=0;k<ins.length;k++){var i=ins[k];" & _
+        "var s=[i.placeholder,i.name,i.id,i.getAttribute('aria-label'),i.getAttribute('autocomplete'),labelOf(i)].join(' ').toLowerCase();" & _
+        "if(/code|passcode|otp|one-time|verification|token/.test(s)){c=i;break;}}" & _
+        "if(!c&&ins.length===1&&/(verification code|one-time passcode|security code|passcode was sent|enter the code)/i.test(t))c=ins[0];" & _
+        "if(!c)return '';" & _
+        "[].slice.call(document.querySelectorAll('[data-crown-code]')).forEach(function(e){e.removeAttribute('data-crown-code');});" & _
+        "c.setAttribute('data-crown-code','1');" & _
+        "var m=t.match(/[^.]*(was sent|was just sent|sent to|text message|via email)[^.]*\./i);" & _
+        "return 'code|'+(m?m[0].trim():'');"
+End Function
+
+' Clicks the "text message" or the "email" choice (arguments[0]).
+Private Function CrownCodeChooseJs() As String
+    CrownCodeChooseJs = _
+        "var re=arguments[0]==='email'?/send code to|e-?mail/i:/text message/i;" & _
+        "var best=null;[].slice.call(document.querySelectorAll('a,button,li,label,div,span,p')).forEach(function(e){" & _
+        "var x=(e.innerText||'').trim();if(x&&x.length<160&&re.test(x)&&e.getBoundingClientRect().width>0){" & _
+        "if(!best||x.length<=(best.innerText||'').trim().length)best=e;}});" & _
+        "if(!best)return 'none';" & _
+        "var go=best.closest('a,button,[role=button]')||best.querySelector('a,button,[role=button]')||best.closest('li,label')||best;" & _
+        "go.click();return 'ok';"
+End Function
+
+' Ticks "don't ask again / remember this device" and presses the button.
+Private Function CrownCodeSubmitJs() As String
+    CrownCodeSubmitJs = _
+        "var vis=function(e){var r=e.getBoundingClientRect();return r.width>0&&r.height>0;};" & _
+        "[].slice.call(document.querySelectorAll('input[type=checkbox]')).forEach(function(c){" & _
+        "var l=c.closest('label')?c.closest('label').innerText:'';" & _
+        "[].slice.call(document.querySelectorAll('label')).forEach(function(x){if(c.id&&x.htmlFor===c.id)l+=' '+x.innerText;});" & _
+        "if(/ask again|remember|trust/i.test(l)&&!c.checked)c.click();});" & _
+        "var bs=[].slice.call(document.querySelectorAll('button,input[type=submit],a')).filter(vis);" & _
+        "for(var k=0;k<bs.length;k++){var x=(bs[k].innerText||bs[k].value||'').trim();" & _
+        "if(/^(verify|continue|submit|sign in|log in|next)$/i.test(x)){bs[k].click();return 'ok';}}" & _
+        "var f=document.querySelector('[data-crown-code]');" & _
+        "if(f&&f.form){if(f.form.requestSubmit)f.form.requestSubmit();else f.form.submit();return 'ok';}" & _
+        "return 'nobutton';"
+End Function
+
+' A date in any of the ways these carriers write one -> "mm-dd-yyyy".
+' "11/05/2026", "Nov 5, 2026", "November 5" (no year: the next one).
+Private Function CrownCodeDate(ByVal text As String) As String
+    Dim m As Object, mon As Long, d As Long, y As Long, dt As Date
+
+    CrownCodeDate = CrownMoreDate(text)
+    If Len(CrownCodeDate) > 0 Then Exit Function
+
+    Set m = CreateObject("VBScript.RegExp")
+    m.IgnoreCase = True
+    m.Pattern = "(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?"
+
+    If Not m.Test(text) Then Exit Function
+
+    With m.Execute(text)(0)
+        mon = (InStr(1, "janfebmaraprmayjunjulaugsepoctnovdec", LCase$(.SubMatches(0)), vbTextCompare) + 2) \ 3
+        d = CLng(.SubMatches(1))
+
+        If Len(.SubMatches(2)) > 0 Then
+            y = CLng(.SubMatches(2))
+        Else
+            y = Year(Date)
+            If DateSerial(y, mon, d) < Date - 180 Then y = y + 1
+        End If
+    End With
+
+    dt = DateSerial(y, mon, d)
+    CrownCodeDate = Format$(dt, "mm-dd-yyyy")
+End Function
+
+' Shared ending of each policy for the code carriers: match, write, report.
+Private Sub CrownCodeRow(ByVal ws As Object, ByVal row As Long, ByVal carrier As String, _
+                         ByVal byNumber As Object, ByVal byName As Object, ByVal listed As Object, _
+                         ByVal policyNo As String, ByVal insured As String, _
+                         ByVal dueAmount As String, ByVal dueDate As String, ByVal cancelDate As String, _
+                         ByVal status As String, ByVal said As String, ByVal note As String, _
+                         ByRef done As Long, ByRef unmatched As Long, ByRef blank As Long, ByRef failed As Long)
+    Dim recordId As String, matchedOn As String, answer As String
+
+    recordId = CrownMoreMatch(byNumber, byName, carrier, policyNo, insured, matchedOn, note, listed)
+
+    ws.Cells(row, 2).value = policyNo
+    ws.Cells(row, 3).value = insured
+    ws.Cells(row, 4).value = dueAmount
+    ws.Cells(row, 5).value = dueDate
+    ws.Cells(row, 6).value = cancelDate
+    ws.Cells(row, 7).value = status
+    ws.Cells(row, 8).value = Now
+    ws.Cells(row, 9).value = matchedOn
+    ws.Cells(row, 11).value = said
+
+    If Len(recordId) = 0 Then
+        If Len(note) = 0 Then note = "no policy on the website with this number or this name"
+        ws.Cells(row, 10).value = note
+        unmatched = unmatched + 1
+    ElseIf Len(dueAmount & dueDate & cancelDate) = 0 Then
+        ws.Cells(row, 1).value = recordId
+        ws.Cells(row, 10).value = Trim$("no amount or date read - left as it was. " & note)
+        blank = blank + 1
+    Else
+        ws.Cells(row, 1).value = recordId
+        answer = CrownMoreWrite(recordId, dueAmount, dueDate, cancelDate, status)
+
+        If InStr(1, answer, """ok"":true", vbTextCompare) > 0 Then
+            ws.Cells(row, 10).value = Trim$("written. " & note)
+            done = done + 1
+        ElseIf Len(Trim$(answer)) = 0 Then
+            ws.Cells(row, 10).value = "the website did not answer - run again for this one"
+            failed = failed + 1
+        Else
+            ws.Cells(row, 10).value = "refused: " & answer
+            failed = failed + 1
+        End If
+    End If
+End Sub
+
+Private Function CrownCodeSheet(ByVal sheetName As String, ByVal carrierShort As String) As Object
+    Dim ws As Object
+
+    Set ws = CrownSheet(sheetName)
+    ws.Cells.ClearContents
+    ws.Columns(2).NumberFormat = "@"
+    ws.Range("A1:K1").value = Array("Record number", "Policy at " & carrierShort, "Insured", "Amount due", _
+                                    "Due date", "Cancel date", "Status", "When", "Matched on", "What happened", _
+                                    carrierShort & " said")
+    Set CrownCodeSheet = ws
+End Function
+
+Private Sub CrownCodeDone(ByVal ws As Object, ByVal carrier As String, ByVal sheetName As String, _
+                          ByVal done As Long, ByVal unmatched As Long, ByVal blank As Long, ByVal failed As Long)
+    ws.Columns("A:J").AutoFit
+    ws.Columns("K").ColumnWidth = 60
+    ThisWorkbook.Save
+    ws.Activate
+
+    MsgBox done & " " & carrier & " policies written to the website." & vbCrLf & _
+           unmatched & " could not be matched to a policy on the website." & vbCrLf & _
+           blank & " showed no amount or date - left as they were." & vbCrLf & _
+           failed & " did not go through." & vbCrLf & vbCrLf & _
+           "The " & sheetName & " sheet has every one, and how it was matched.", _
+           vbInformation, "Crown Superior"
+End Sub
+
+
+' ---------------------------------------------------------------------
+' Progressive (ForAgentsOnly) - the steps of his
+' ScrapeForAGentonlypaymentduedate: URL_10, USER_4 / PASS_4, "Active
+' Policies", each customer's page, the "$X due DATE" line.
+' ---------------------------------------------------------------------
+Public Sub CrownProgressivePaymentDue()
+    Dim drv As ChromeDriver, clsDrv As Chrm
+    Dim Keys As New Selenium.Keys
+    Dim wsInput As Worksheet, ws As Object
+    Dim byNumber As Object, byName As Object, listed As Object
+    Dim answer As String, parts() As String, titles() As String, says() As String
+    Dim people As Collection, person As Variant, links As Boolean
+    Dim pageNo As Long, i As Long, k As Long, n As Long, row As Long
+    Dim insured As String, policyNo As String, said As String, note As String
+    Dim dueAmount As String, dueDate As String
+    Dim done As Long, unmatched As Long, blank As Long, failed As Long
+    Dim started As Date
+
+    Set wsInput = ThisWorkbook.Worksheets("Input")
+
+    CrownMoreIndex PG_CARRIER, byNumber, byName
+
+    If byNumber.Count = 0 And byName.Count = 0 Then
+        MsgBox "No Progressive policies came back from the website.", vbExclamation, "Crown Superior"
+        Exit Sub
+    End If
+
+    Set ws = CrownCodeSheet("ProgressivePayments", "Progressive")
+    row = 2
+
+    Set drv = CrownCodeDriver(PG_CARRIER, clsDrv)
+    If Not CrownChromeOk(drv) Then Exit Sub
+
+    drv.Get wsInput.Range("URL_10").value
+
+    ' Sign in - unless Chrome is still signed in from last time.
+    started = Now
+    Do
+        answer = CrownMoreJs(drv, "return document.getElementById('sbp-search')?'in':(document.getElementById('user1')?'login':'');")
+        If Len(answer) > 0 Then Exit Do
+        If Len(CrownMoreJs(drv, CrownCodePageJs())) > 0 Then Exit Do
+        drv.Wait 700
+        DoEvents
+    Loop While (Now - started) * 86400 < 60
+
+    If answer = "login" Then
+        EnterData drv, Keys, "user1", wsInput.Range("USER_4").value, "ID"
+        EnterData drv, Keys, "password1", wsInput.Range("PASS_4").value, "ID"
+        ClickElement drv, "image1", "ID"
+        drv.Wait 2000
+    End If
+
+    If Not CrownCodeWait(drv, PG_CARRIER, "return document.getElementById('sbp-search')?'ok':'';", 180) Then
+        MsgBox "Did not get to Progressive's policy search, so nothing has been changed." & vbCrLf & _
+               "(If Progressive asked for something other than a code, tell me what it showed.)", _
+               vbExclamation, "Crown Superior"
+        GoTo Finish
+    End If
+
+    If Not CrownPgSearch(drv) Then
+        MsgBox "Progressive's list of active policies did not come up, so nothing has been changed.", _
+               vbExclamation, "Crown Superior"
+        GoTo Finish
+    End If
+
+    ' Every customer on every page of the list, with the link to their page.
+    Set people = New Collection
+    links = True
+    pageNo = 1
+
+    Do
+        answer = CrownMoreJs(drv, CrownPgListJs())
+
+        If Len(answer) > 0 Then
+            For Each person In Split(answer, "~~")
+                parts = Split(person, "||")
+                people.Add Array(parts(0), parts(1), pageNo, CLng(parts(2)))
+                If Len(parts(1)) = 0 Then links = False
+            Next person
+        End If
+
+        If CrownMoreJs(drv, CrownPgNextJs()) <> "ok" Then Exit Do
+
+        pageNo = pageNo + 1
+        If Not CrownMoreWaitJs(drv, "return ((document.querySelector('.paginate_button.current')||{}).innerText||'').trim()==='" & pageNo & "'?'ok':'';", 20) Then Exit Do
+        drv.Wait 800
+    Loop While pageNo < 200
+
+    If people.Count = 0 Then
+        MsgBox "Progressive's active policy list came up empty, so nothing has been changed.", vbInformation, "Crown Superior"
+        GoTo Finish
+    End If
+
+    ' Pass 1: every policy number, so a name match never lands on a record
+    ' whose own policy is also here (the Trexis lesson). Pass 2 writes.
+    Dim found As Collection
+    Set found = New Collection
+    Set listed = CreateObject("Scripting.Dictionary")
+
+    For Each person In people
+        insured = person(0)
+        note = ""
+
+        If links Then
+            drv.Get person(1)
+        ElseIf Not CrownPgOpenByClick(drv, person(2), person(3)) Then
+            found.Add Array(insured, "", "", "the list did not come back to open this customer")
+            GoTo NextPerson
+        End If
+
+        answer = ""
+        started = Now
+        Do
+            answer = CrownMoreJs(drv, CrownPgDetailJs())
+            If answer = "none" Then Exit Do
+
+            ' The policy is there; give the payment line a few seconds to follow.
+            If Left$(answer, 3) = "ok|" Then
+                If InStrRev(answer, "|") < Len(answer) Or (Now - started) * 86400 > 8 Then Exit Do
+            End If
+            drv.Wait 700
+            DoEvents
+        Loop While (Now - started) * 86400 < 30
+
+        If Left$(answer, 3) <> "ok|" Then
+            found.Add Array(insured, "", "", IIf(answer = "none", "Progressive shows no policy for this customer", "the customer's page did not open"))
+            GoTo NextPerson
+        End If
+
+        parts = Split(answer, "|")
+        titles = Split(parts(1), "~")
+        says = Split(parts(2) & " ", "~")
+
+        For k = 0 To UBound(titles)
+            policyNo = CrownPgPolicyNo(titles(k))
+            said = ""
+            note = ""
+
+            If UBound(titles) = UBound(says) Then
+                said = Trim$(says(k))
+            ElseIf k = 0 Then
+                said = Trim$(says(0))
+                note = "more than one policy on this customer's page - check this one"
+            Else
+                note = "more than one policy on this customer's page - no payment line read for this one"
+            End If
+            found.Add Array(insured, policyNo, said, note)
+            If Len(CrownDigits(policyNo)) > 0 Then listed(CrownDigits(policyNo)) = True
+        Next k
+
+NextPerson:
+        If Not links Then
+            drv.GoBack
+            drv.Wait 1500
+        End If
+        DoEvents
+    Next person
+
+    For Each person In found
+        insured = person(0): policyNo = person(1): said = person(2): note = person(3)
+        dueAmount = "": dueDate = ""
+
+        If Len(said) > 0 Then
+            If InStr(said, "$") > 0 Then dueAmount = CrownMoreMoney(Split(Mid$(said, InStr(said, "$")), " ")(0))
+
+            If InStr(1, said, " due", vbTextCompare) > 0 Then
+                dueDate = CrownCodeDate(Mid$(said, InStr(1, said, " due", vbTextCompare) + 4))
+            ElseIf InStr(1, said, "withdrawn", vbTextCompare) > 0 Then
+                dueDate = CrownCodeDate(Mid$(said, InStr(1, said, "withdrawn", vbTextCompare) + 9))
+            End If
+            If Len(dueDate) = 0 Then dueDate = CrownCodeDate(said)
+        End If
+
+        If Len(policyNo) = 0 And Len(note) > 0 Then
+            ws.Cells(row, 3).value = insured
+            ws.Cells(row, 8).value = Now
+            ws.Cells(row, 10).value = note
+            failed = failed + 1
+        Else
+            CrownCodeRow ws, row, PG_CARRIER, byNumber, byName, listed, policyNo, insured, _
+                         dueAmount, dueDate, "", "Active", said, note, done, unmatched, blank, failed
+        End If
+
+        row = row + 1
+        DoEvents
+    Next person
+
+Finish:
+    On Error Resume Next
+    drv.Quit
+    On Error GoTo 0
+
+    CrownCodeDone ws, PG_CARRIER, "ProgressivePayments", done, unmatched, blank, failed
+End Sub
+
+' "Active Policies" and Search, then wait for the list (or "no results").
+Private Function CrownPgSearch(ByVal drv As ChromeDriver) As Boolean
+    CrownMoreJs drv, _
+        "var s=document.getElementById('SBP_UserSelectedStatus');if(s){for(var k=0;k<s.options.length;k++){" & _
+        "if(s.options[k].text.trim()==='Active Policies'){s.selectedIndex=k;s.dispatchEvent(new Event('change',{bubbles:true}));}}}" & _
+        "var b=document.getElementById('sbp-search');if(b)b.click();return 'ok';"
+
+    drv.Wait 2000
+    CrownPgSearch = CrownMoreWaitJs(drv, _
+        "return document.querySelector('a[data-at=loss-run-customer-search-name-link]')?'ok':'';", 60)
+End Function
+
+' This page of the list: "name||link||index~~name||link||index...".
+Private Function CrownPgListJs() As String
+    CrownPgListJs = _
+        "var a=document.querySelectorAll('a[data-at=loss-run-customer-search-name-link]');var out=[];" & _
+        "for(var k=0;k<a.length;k++){var h=a[k].getAttribute('href')||'';" & _
+        "if(!h||h==='#'||/^javascript:/i.test(h))h='';else h=a[k].href;" & _
+        "out.push(a[k].innerText.replace(/\|/g,' ').replace(/~/g,' ').trim()+'||'+h+'||'+k);}return out.join('~~');"
+End Function
+
+Private Function CrownPgPageJs() As String
+    CrownPgPageJs = "return ((document.querySelector('.paginate_button.current')||{}).innerText||'1').trim();"
+End Function
+
+Private Function CrownPgNextJs() As String
+    CrownPgNextJs = _
+        "var n=document.querySelector('.paginate_button.next:not(.disabled)');if(!n)return 'last';n.click();return 'ok';"
+End Function
+
+' "none" when Progressive says there is no policy; "ok|titles|payment
+' lines" (each joined with ~) once the page is there; "" while loading.
+Private Function CrownPgDetailJs() As String
+    CrownPgDetailJs = _
+        "if(document.querySelector('h5.noPoliciesFoundMessage'))return 'none';" & _
+        "var al=[].slice.call(document.querySelectorAll('p.alert')).filter(function(p){return /previous page/i.test(p.innerText);});" & _
+        "if(al.length)return 'none';" & _
+        "var ti=[].slice.call(document.querySelectorAll('div.policyTitle p')).map(function(e){return e.innerText.replace(/[|~]/g,' ').trim();});" & _
+        "if(!ti.length)return '';" & _
+        "var cs=[].slice.call(document.querySelectorAll('div.CSPItem')).map(function(e){return e.innerText.replace(/\s+/g,' ').replace(/[|~]/g,' ').trim();});" & _
+        "return 'ok|'+ti.join('~')+'|'+cs.join('~');"
+End Function
+
+' "Policy 123456789, Auto ..." -> "123456789" (his rule: the last word
+' before the first comma).
+Private Function CrownPgPolicyNo(ByVal title As String) As String
+    Dim w() As String
+
+    If InStr(title, ",") > 0 Then title = Left$(title, InStr(title, ",") - 1)
+    w = Split(Application.WorksheetFunction.Trim(title), " ")
+    If UBound(w) >= 0 Then CrownPgPolicyNo = w(UBound(w))
+End Function
+
+' Only when the list's names are not plain links: back to that page of
+' the list (searching again if Progressive forgot it) and click the name.
+Private Function CrownPgOpenByClick(ByVal drv As ChromeDriver, ByVal pageNo As Long, ByVal index As Long) As Boolean
+    Dim tries As Long
+
+    If Not CrownMoreWaitJs(drv, "return document.querySelector('a[data-at=loss-run-customer-search-name-link]')?'ok':'';", 20) Then
+        If Not CrownPgSearch(drv) Then Exit Function
+    End If
+
+    ' Past that page (the list keeps the last page shown): search again, which starts at page 1.
+    If Val(CrownMoreJs(drv, CrownPgPageJs())) > pageNo Then
+        If Not CrownPgSearch(drv) Then Exit Function
+    End If
+
+    Do While CrownMoreJs(drv, CrownPgPageJs()) <> CStr(pageNo)
+        tries = tries + 1
+        If tries > pageNo + 2 Then Exit Function
+        If CrownMoreJs(drv, CrownPgNextJs()) <> "ok" Then Exit Function
+        drv.Wait 1500
+    Loop
+
+    CrownPgOpenByClick = (CrownMoreJs(drv, _
+        "var a=document.querySelectorAll('a[data-at=loss-run-customer-search-name-link]');" & _
+        "if(a.length<=arguments[0])return '';a[arguments[0]].click();return 'ok';", CStr(index)) = "ok")
+    drv.Wait 2000
+End Function
+
+
+' ---------------------------------------------------------------------
+' First Acceptance - the steps of his ScrapeFirstAcceptance: URL_31,
+' USER_25 / PASS_25, Policy Services, Active & Reinstatable Policies,
+' Open Search, each policy's status and its Billing Details.
+' ---------------------------------------------------------------------
+Public Sub CrownFirstAcceptancePaymentDue()
+    Dim drv As ChromeDriver, clsDrv As Chrm
+    Dim Keys As New Selenium.Keys
+    Dim wsInput As Worksheet, ws As Object
+    Dim byNumber As Object, byName As Object, listed As Object
+    Dim answer As String, parts() As String
+    Dim rowsXp As String, i As Long, n As Long, row As Long
+    Dim policyNo As String, insured As String, status As String, said As String, note As String
+    Dim dueAmount As String, dueDate As String, cancelDate As String
+    Dim done As Long, unmatched As Long, blank As Long, failed As Long
+    Dim started As Date
+
+    Set wsInput = ThisWorkbook.Worksheets("Input")
+
+    CrownMoreIndex FA_CARRIER, byNumber, byName
+
+    If byNumber.Count = 0 And byName.Count = 0 Then
+        MsgBox "No First Acceptance policies came back from the website.", vbExclamation, "Crown Superior"
+        Exit Sub
+    End If
+
+    Set ws = CrownCodeSheet("FirstAcceptancePayments", "First Acceptance")
+    row = 2
+
+    Set drv = CrownCodeDriver(FA_CARRIER, clsDrv)
+    If Not CrownChromeOk(drv) Then Exit Sub
+
+    drv.Get wsInput.Range("URL_31").value
+
+    started = Now
+    Do
+        answer = CrownMoreJs(drv, "return document.getElementById('v-3')?'login':(document.querySelector('iframe')?'in':'');")
+        If Len(answer) > 0 Then Exit Do
+        If Len(CrownMoreJs(drv, CrownCodePageJs())) > 0 Then Exit Do
+        drv.Wait 700
+        DoEvents
+    Loop While (Now - started) * 86400 < 60
+
+    If answer = "login" Then
+        EnterData drv, Keys, "v-3", wsInput.Range("USER_25").value, "ID"
+        EnterData drv, Keys, "v-7", wsInput.Range("PASS_25").value, "ID"
+        drv.Keyboard.SendKeys Keys.Enter
+        drv.Wait 3000
+    End If
+
+    ' Signed in = no box to type in on the page itself (sign-in or code)
+    ' and the policy screen - an iframe, as his macro found - is there.
+    If Not CrownCodeWait(drv, FA_CARRIER, _
+            "var v=[].slice.call(document.querySelectorAll('input')).filter(function(i){var r=i.getBoundingClientRect();" & _
+            "return i.type!=='hidden'&&r.width>0&&r.height>0;});return (!v.length&&document.querySelector('iframe'))?'ok':'';", 180) Then
+        MsgBox "Did not get past First Acceptance's sign-in, so nothing has been changed." & vbCrLf & _
+               "(If it asked for something other than a code, send me a screenshot of it.)", _
+               vbExclamation, "Crown Superior"
+        GoTo Finish
+    End If
+
+    drv.Wait 2000
+
+    On Error Resume Next
+    drv.SwitchToFrame 0
+    On Error GoTo 0
+
+    If Not CrownFaWaitX(drv, "//div[contains(@class, 'aspect-square') and contains(., 'Policy Services')]", 60) Then
+        MsgBox "First Acceptance's Policy Services tile did not show up, so nothing has been changed.", _
+               vbExclamation, "Crown Superior"
+        GoTo Finish
+    End If
+
+    CrownFaClick drv, "//div[contains(@class, 'aspect-square') and contains(., 'Policy Services')]"
+    CrownFaClick drv, "//button[contains(., 'Active & Reinstatable Policies')]"
+    CrownFaClick drv, "//table/tbody/tr[1]/td[2]//button"
+    CrownFaClick drv, "//button[.//span[text()='Open Search']]"
+
+    rowsXp = "//div[@data-component='x-policy-search-dialog']//table/tbody/tr"
+
+    If Not CrownFaWaitX(drv, rowsXp & "[1]/td[2]//button", 60) Then
+        MsgBox "First Acceptance's policy search list did not come up, so nothing has been changed.", _
+               vbExclamation, "Crown Superior"
+        GoTo Finish
+    End If
+
+    n = drv.FindElementsByXPath(rowsXp).Count
+
+    ' Every policy number first (the Trexis lesson), then each policy.
+    Set listed = CreateObject("Scripting.Dictionary")
+    For i = 1 To n
+        policyNo = CrownFaText(drv, rowsXp & "[" & i & "]/td[2]//button")
+        If Len(CrownDigits(policyNo)) > 0 Then listed(CrownDigits(policyNo)) = True
+    Next i
+
+    For i = 1 To n
+        policyNo = "": insured = "": status = "": said = "": note = ""
+        dueAmount = "": dueDate = "": cancelDate = ""
+
+        If Not CrownFaWaitX(drv, rowsXp & "[" & i & "]/td[2]//button", 30) Then
+            ws.Cells(row, 10).value = "the search list did not come back for row " & i & " - stopped here"
+            failed = failed + 1
+            Exit For
+        End If
+
+        policyNo = CrownFaText(drv, rowsXp & "[" & i & "]/td[2]//button")
+        insured = Trim$(CrownFaText(drv, rowsXp & "[" & i & "]/td[3]") & " " & CrownFaText(drv, rowsXp & "[" & i & "]/td[4]"))
+
+        CrownFaClick drv, rowsXp & "[" & i & "]/td[2]//button"
+
+        If CrownFaWaitX(drv, "//span[contains(text(),'Policy Status')]", 30) Then
+            status = CrownFaText(drv, "//span[contains(text(),'Policy Status')]/following::div[1]")
+
+            CrownFaClick drv, "//button[normalize-space()='Billing Details']"
+            CrownFaWaitX drv, "//span[text()='Payment Information']", 20
+
+            answer = CrownMoreJs(drv, CrownFaBillingJs())
+            If Left$(answer, 3) = "ok|" Then
+                parts = Split(answer, "|")
+                dueDate = CrownCodeDate(parts(1))
+                dueAmount = CrownMoreMoney(parts(2))
+                cancelDate = CrownCodeDate(parts(3))
+                said = "Due Date " & parts(1) & "; Current Balance " & parts(2) & "; Cancellation Date " & parts(3)
+            Else
+                note = "Billing Details did not show Payment Information"
+            End If
+        Else
+            note = "the policy did not open"
+        End If
+
+        CrownCodeRow ws, row, FA_CARRIER, byNumber, byName, listed, policyNo, insured, _
+                     dueAmount, dueDate, cancelDate, status, said, note, done, unmatched, blank, failed
+        row = row + 1
+
+        CrownFaClick drv, "//button[.//span[text()='Open Search']]"
+        DoEvents
+    Next i
+
+Finish:
+    On Error Resume Next
+    drv.Quit
+    On Error GoTo 0
+
+    CrownCodeDone ws, FA_CARRIER, "FirstAcceptancePayments", done, unmatched, blank, failed
+End Sub
+
+Private Function CrownFaWaitX(ByVal drv As ChromeDriver, ByVal xp As String, ByVal seconds As Long) As Boolean
+    Dim started As Date
+
+    started = Now
+    Do
+        On Error Resume Next
+        CrownFaWaitX = (drv.FindElementsByXPath(xp).Count > 0)
+        On Error GoTo 0
+        If CrownFaWaitX Then Exit Function
+        drv.Wait 700
+        DoEvents
+    Loop While (Now - started) * 86400 < seconds
+End Function
+
+Private Function CrownFaText(ByVal drv As ChromeDriver, ByVal xp As String) As String
+    On Error Resume Next
+    CrownFaText = Trim$(Replace(drv.FindElementByXPath(xp).text, Chr(160), " "))
+    On Error GoTo 0
+End Function
+
+' Click (when it is there) and let First Acceptance's spinner finish.
+Private Sub CrownFaClick(ByVal drv As ChromeDriver, ByVal xp As String)
+    If CrownFaWaitX(drv, xp, 20) Then
+        On Error Resume Next
+        drv.ExecuteScript "arguments[0].scrollIntoView({block:'center'});", drv.FindElementByXPath(xp)
+        drv.FindElementByXPath(xp).Click
+        On Error GoTo 0
+    End If
+
+    drv.Wait 800
+    WaitSpinnerGone drv
+End Sub
+
+' "ok|due date|current balance|cancellation date" from Payment Information.
+Private Function CrownFaBillingJs() As String
+    CrownFaBillingJs = _
+        "var h=[].slice.call(document.querySelectorAll('span')).filter(function(s){return s.innerText.trim()==='Payment Information';})[0];" & _
+        "if(!h)return '';var card=h.closest('[class*=card-shadow]')||h.parentNode.parentNode;" & _
+        "var x=function(r,p){var n=document.evaluate(p,r,null,9,null).singleNodeValue;return n?n.textContent.replace(/\u00a0/g,' ').trim():'';};" & _
+        "var due='',bal='',can='';[].slice.call(card.querySelectorAll('[data-component=x-description-list-item]')).forEach(function(r){" & _
+        "var l=x(r,'.//div[1]//span'),v=x(r,'.//div[2]//span').replace(/[|]/g,' ');" & _
+        "if(/Due Date/i.test(l))due=v;if(/Current Balance/i.test(l))bal=v;if(/Cancellation Date/i.test(l))can=v;});" & _
+        "return 'ok|'+due+'|'+bal+'|'+can;"
+End Function
+
+
+' ---------------------------------------------------------------------
+' National General - no payment run yet. This signs in (with the code)
+' and saves the pages Tony opens, so the payment run can be built from
+' what National General really shows.
+' ---------------------------------------------------------------------
+Public Sub CrownNatGenLook()
+    Dim drv As ChromeDriver, clsDrv As Chrm
+    Dim Keys As New Selenium.Keys
+    Dim wsInput As Worksheet
+    Dim answer As String, url As String
+    Dim started As Date
+
+    Set wsInput = ThisWorkbook.Worksheets("Input")
+
+    Set drv = CrownCodeDriver(NG_CARRIER, clsDrv)
+    If Not CrownChromeOk(drv) Then Exit Sub
+
+    url = Trim$(wsInput.Range("URL_30").value)
+    If Len(url) = 0 Then url = "https://natgenagency.com"
+    drv.Get url
+
+    ' His Mod9FillNationalGeneral sign-in: txtUserID > btnLogin > Password > SIGN IN.
+    started = Now
+    Do
+        answer = CrownMoreJs(drv, "return document.getElementById('txtUserID')?'user':(document.getElementById('Password')?'pass':'');")
+        If Len(answer) > 0 Then Exit Do
+        drv.Wait 700
+        DoEvents
+    Loop While (Now - started) * 86400 < 30
+
+    If answer = "user" Then
+        EnterData drv, Keys, "txtUserID", wsInput.Range("USER_30").value, "ID"
+        ClickElement drv, "btnLogin", "ID"
+        CrownMoreWaitJs drv, "return document.getElementById('Password')?'ok':'';", 30
+        answer = "pass"
+    End If
+
+    If answer = "pass" Then
+        EnterData drv, Keys, "Password", wsInput.Range("PASS_30").value, "ID"
+        ClickElement drv, "//button[contains(text(),'SIGN IN')]", "XPATH"
+        drv.Wait 2500
+    Else
+        MsgBox "Please sign in to National General in the Chrome window, then press OK here.", _
+               vbInformation, "Crown Superior"
+    End If
+
+    If Not CrownCodeWait(drv, NG_CARRIER, _
+            "return (location.hostname.indexOf('login.')!==0&&!document.querySelector('input[type=password]')" & _
+            "&&!document.getElementById('txtUserID'))?'ok':'';", 180) Then
+        MsgBox "Did not get past National General's sign-in. Send me a screenshot of what it shows.", _
+               vbExclamation, "Crown Superior"
+        GoTo Finish
+    End If
+
+    CrownLookPages drv, NG_CARRIER
+
+Finish:
+    On Error Resume Next
+    drv.Quit
+    On Error GoTo 0
+End Sub
+
+' Saves each page Tony opens (picture + page code) into one folder in
+' Downloads, until he presses Cancel, then opens the folder.
+Private Sub CrownLookPages(ByVal drv As ChromeDriver, ByVal carrier As String)
+    Dim folder As String, k As Long, frames As String
+
+    folder = Environ$("USERPROFILE") & "\Downloads\CrownLook-" & Replace(carrier, " ", "") & "-" & Format$(Now, "yyyymmdd-hhnn")
+    On Error Resume Next
+    MkDir folder
+    On Error GoTo 0
+
+    Do
+        If MsgBox("Signed in to " & carrier & "." & vbCrLf & vbCrLf & _
+                  "In the Chrome window, open the page I should see, then press OK here to save it:" & vbCrLf & _
+                  "  1. the list or search of your policies" & vbCrLf & _
+                  "  2. one policy's page that shows the amount due, due date and cancel date" & vbCrLf & _
+                  "  3. anything else that has payment information" & vbCrLf & vbCrLf & _
+                  "Pages saved so far: " & k & ". Press Cancel when you are finished.", _
+                  vbOKCancel + vbInformation, "Crown Superior - " & carrier) = vbCancel Then Exit Do
+
+        k = k + 1
+
+        On Error Resume Next
+        drv.SwitchToDefaultContent
+        drv.TakeScreenshot.SaveAs folder & "\page" & k & ".png"
+        CrownLookSave folder & "\page" & k & ".html", "<!-- " & drv.url & " -->" & vbCrLf & drv.PageSource
+        frames = CrownMoreJs(drv, _
+            "return [].map.call(document.querySelectorAll('iframe'),function(f,i){try{return '<!-- frame '+i+' '+f.src+' -->'+" & _
+            "f.contentDocument.documentElement.outerHTML;}catch(e){return '<!-- frame '+i+' '+f.src+' (other site) -->';}}).join('\n');")
+        If Len(frames) > 0 Then CrownLookSave folder & "\page" & k & "-frames.html", frames
+        On Error GoTo 0
+    Loop While k < 30
+
+    If k > 0 Then
+        Shell "explorer.exe """ & folder & """", vbNormalFocus
+        MsgBox k & " page(s) saved in:" & vbCrLf & folder & vbCrLf & vbCrLf & _
+               "Please zip that folder (right-click > Send to > Compressed folder) and send it to me in our chat.", _
+               vbInformation, "Crown Superior"
+    End If
+End Sub
+
+Private Sub CrownLookSave(ByVal path As String, ByVal text As String)
+    With CreateObject("ADODB.Stream")
+        .Type = 2
+        .Charset = "utf-8"
+        .Open
+        .WriteText text
+        .SaveToFile path, 2
+        .Close
+    End With
+End Sub
