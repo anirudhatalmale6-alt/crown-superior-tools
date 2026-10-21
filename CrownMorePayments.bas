@@ -1465,11 +1465,15 @@ Public Sub CrownFirstAcceptancePaymentDue()
         drv.Wait 3000
     End If
 
-    ' Signed in = no box to type in on the page itself (sign-in or code)
-    ' and the policy screen - an iframe, as his macro found - is there.
+    ' Signed in = the sign-in boxes have gone and the Action Hub ("Policy
+    ' Services") is showing - on the page itself or inside its frame.
+    ' (21 Oct: the first version also wanted no box to type in, but the
+    ' Action Hub has its own Search box, so it never counted as signed in.)
     If Not CrownCodeWait(drv, FA_CARRIER, _
-            "var v=[].slice.call(document.querySelectorAll('input')).filter(function(i){var r=i.getBoundingClientRect();" & _
-            "return i.type!=='hidden'&&r.width>0&&r.height>0;});return (!v.length&&document.querySelector('iframe'))?'ok':'';", 180) Then
+            "if(document.getElementById('v-7'))return '';var hub=function(d){try{return /Policy Services|Action Hub/i.test(d.body.innerText);}catch(e){return false;}};" & _
+            "if(hub(document))return 'ok';var fs=document.querySelectorAll('iframe');" & _
+            "for(var k=0;k<fs.length;k++){try{if(hub(fs[k].contentDocument))return 'ok';}catch(e){}}" & _
+            "return (fs.length&&/apps\/portal/i.test(location.href)&&!/verification|one-time|passcode|security code/i.test(document.body.innerText))?'ok':'';", 180) Then
         MsgBox "Did not get past First Acceptance's sign-in, so nothing has been changed." & vbCrLf & _
                "(If it asked for something other than a code, send me a screenshot of it.)", _
                vbExclamation, "Crown Superior"
@@ -1478,11 +1482,9 @@ Public Sub CrownFirstAcceptancePaymentDue()
 
     drv.Wait 2000
 
-    On Error Resume Next
-    drv.SwitchToFrame 0
-    On Error GoTo 0
-
-    If Not CrownFaWaitX(drv, "//div[contains(@class, 'aspect-square') and contains(., 'Policy Services')]", 60) Then
+    ' The tile is on the page or in one of its frames (his macro assumed
+    ' frame 0) - go to wherever it is.
+    If Not CrownFaFindFrame(drv, "//div[contains(@class, 'aspect-square') and contains(., 'Policy Services')]", 60) Then
         MsgBox "First Acceptance's Policy Services tile did not show up, so nothing has been changed.", _
                vbExclamation, "Crown Superior"
         GoTo Finish
@@ -1560,6 +1562,45 @@ Finish:
 
     CrownCodeDone ws, FA_CARRIER, "FirstAcceptancePayments", done, unmatched, blank, failed
 End Sub
+
+' Leaves the driver in the page or frame that has the element.
+Private Function CrownFaFindFrame(ByVal drv As ChromeDriver, ByVal xp As String, ByVal seconds As Long) As Boolean
+    Dim started As Date, i As Long, n As Long
+
+    started = Now
+    Do
+        On Error Resume Next
+        drv.SwitchToDefaultContent
+        If drv.FindElementsByXPath(xp).Count > 0 Then
+            If Err.Number = 0 Then
+                CrownFaFindFrame = True
+                Exit Function
+            End If
+        End If
+        Err.Clear
+
+        n = drv.FindElementsByTag("iframe").Count
+        For i = 0 To n - 1
+            drv.SwitchToDefaultContent
+            drv.SwitchToFrame i
+            If Err.Number = 0 Then
+                If drv.FindElementsByXPath(xp).Count > 0 Then
+                    If Err.Number = 0 Then
+                        CrownFaFindFrame = True
+                        Exit Function
+                    End If
+                End If
+            End If
+            Err.Clear
+        Next i
+
+        drv.SwitchToDefaultContent
+        On Error GoTo 0
+
+        drv.Wait 1000
+        DoEvents
+    Loop While (Now - started) * 86400 < seconds
+End Function
 
 Private Function CrownFaWaitX(ByVal drv As ChromeDriver, ByVal xp As String, ByVal seconds As Long) As Boolean
     Dim started As Date
