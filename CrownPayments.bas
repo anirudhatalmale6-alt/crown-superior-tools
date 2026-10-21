@@ -2044,6 +2044,7 @@ Public Sub CrownVervePaymentDue()
     Dim dismissed As Long
     Dim look As Long, looked As Long
     Dim pageWords As String, quiet As Long
+    Dim stmtCancel As String
     Dim notOpened As Long
     Dim finished As Object, finishedWhy As String, rested As Long
     Dim lookupAnswer As String
@@ -2170,6 +2171,7 @@ Public Sub CrownVervePaymentDue()
         dueDate = ""
         cancelDate = ""
         policyStatus = ""
+        stmtCancel = ""
         note = ""
         futureNote = ""
         futureDate = ""
@@ -2300,6 +2302,21 @@ Public Sub CrownVervePaymentDue()
                 note = "Verve said: " & Left$(activity, 80)
             End If
 
+            ' 21 Oct, Aleman GAF20095788: the report called it "Reinstatement"
+            ' (its last transaction, not its status) while the statement ends
+            ' "Cancellation Premium Eff. 09/03/2026 ... Final Cancellation
+            ' Notice" with no payment since. When there is no instalment
+            ' coming, the statement's last lines decide: a cancellation with
+            ' nothing after it is Cancelled, on that date.
+            If InStr(1, activity, "Installment For", vbTextCompare) = 0 Then
+                stmtCancel = CrownVerveStatementCancel(drv)
+                If Len(stmtCancel) > 0 Then
+                    policyStatus = "Cancelled"
+                    cancelDate = stmtCancel
+                    note = Trim$(note & " statement ends in a cancellation eff. " & stmtCancel & " with no payment since")
+                End If
+            End If
+
             ' Nothing owed today does not mean nothing owed. The
             ' billing line is about now; the Future tab is where the next
             ' instalment is, and that is the figure the customer wants to
@@ -2415,7 +2432,10 @@ Public Sub CrownVervePaymentDue()
                 reported = Trim$(CStr(statuses(CrownDigits(policyNo))))
             End If
 
-            If Len(reported) > 0 Then policyStatus = reported
+            ' The report's word only when it is a status: "Reinstatement",
+            ' "New Business", "Renewal" are what last HAPPENED to the policy.
+            ' And never over a cancellation the statement itself shows.
+            If Len(reported) > 0 And Len(stmtCancel) = 0 And Not CrownIsTransactionWord(reported) Then policyStatus = reported
         Else
             note = "no policy of that number at Verve"
         End If
@@ -2786,6 +2806,57 @@ Private Function CrownCouldBePolicyColumn(ByVal text As String) As Boolean
     If InStr(text, "/") > 0 Then Exit Function
 
     CrownCouldBePolicyColumn = CrownLooksLikePolicy(text)
+End Function
+
+' A transaction, not a status ("Reinstatement", "New Business" ...).
+Private Function CrownIsTransactionWord(ByVal text As String) As Boolean
+    Dim m As Object
+
+    Set m = CreateObject("VBScript.RegExp")
+    m.IgnoreCase = True
+    m.Pattern = "^\s*(reinstatement|new business|renewal|endorsement|rewrite|re-?write|policy change)\b"
+    CrownIsTransactionWord = m.Test(text)
+End Function
+
+' The cancellation date ("09/03/2026") when the Billing statement's last
+' lines are a cancellation with no reinstatement or payment after it;
+' "" otherwise. Goes to the last page of the statement first (it is in
+' pages of 25, oldest first).
+Private Function CrownVerveStatementCancel(ByVal drv As ChromeDriver) As String
+    Dim answer As String, tries As Long
+
+    For tries = 1 To 4
+        On Error Resume Next
+        answer = CStr(drv.ExecuteScript(CrownVerveStatementJs()))
+        If Err.Number <> 0 Then answer = ""
+        On Error GoTo 0
+
+        If answer <> "paging" Then Exit For
+
+        drv.Wait 2500
+        WaitForPopupToDisappear drv, 10000
+    Next tries
+
+    If Left$(answer, 10) = "cancelled|" Then CrownVerveStatementCancel = CrownFirstDate(Mid$(answer, 11))
+End Function
+
+Private Function CrownVerveStatementJs() As String
+    CrownVerveStatementJs = _
+        "var cl=function(e){return (e.innerText||'').replace(/\s+/g,' ').trim();};" & _
+        "var hdr=null,grid=null;[].slice.call(document.querySelectorAll('tr')).forEach(function(tr){" & _
+        "var c=[].slice.call(tr.children).map(cl);if(!hdr&&c.indexOf('Description')>=0&&c.indexOf('Billed')>=0&&c.indexOf('Paid')>=0){hdr=c;grid=tr.closest('table');}});" & _
+        "if(!grid)return 'nogrid';" & _
+        "var outer=grid.parentNode;for(var u=0;u<6&&outer&&!/Page \d+ of \d+/.test(cl(outer));u++)outer=outer.parentNode;" & _
+        "var pg=outer?cl(outer).match(/Page (\d+) of (\d+)/):null;" & _
+        "if(pg&&+pg[1]<+pg[2]){var ls=[].slice.call(outer.querySelectorAll('a,span,td')).filter(function(a){return cl(a)===pg[2]&&a.children.length===0;});" & _
+        "if(ls.length){ls[ls.length-1].click();return 'paging';}return 'nopage';}" & _
+        "var di=hdr.indexOf('Description'),pi=hdr.indexOf('Paid');var rows=[];" & _
+        "[].slice.call(grid.querySelectorAll('tr')).forEach(function(tr){var c=[].slice.call(tr.children).map(cl);" & _
+        "if(c.length>=hdr.length-1&&c[di]&&c[di]!=='Description')rows.push({d:c[di],p:c[pi]||''});});" & _
+        "var cx=-1,after=-1,eff='';rows.forEach(function(r,k){" & _
+        "if(/cancellation (premium|credit) eff|final cancellation notice/i.test(r.d)){cx=k;var m=r.d.match(/eff\.?\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/i);if(m)eff=m[1];}" & _
+        "else if(/reinstat/i.test(r.d)||(parseFloat(r.p.replace(/[^0-9.\-]/g,''))||0)!==0)after=k;});" & _
+        "return (cx>=0&&cx>after&&eff)?'cancelled|'+eff:'no';"
 End Function
 
 ' Is this one of the words this agency uses for a policy's status?
