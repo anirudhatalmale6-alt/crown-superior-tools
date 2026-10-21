@@ -885,7 +885,7 @@ End Function
 ' =====================================================================
 
 ' A Chrome that keeps its cookies between runs, one folder per carrier.
-Private Function CrownCodeDriver(ByVal carrier As String, ByRef clsDrv As Chrm) As ChromeDriver
+Public Function CrownCodeDriver(ByVal carrier As String, ByRef clsDrv As Chrm) As ChromeDriver
     Dim folder As String
 
     folder = Environ$("LOCALAPPDATA") & "\CrownSuperior"
@@ -1316,7 +1316,7 @@ End Sub
 
 ' Signs in to Progressive (USER_4 / PASS_4 at URL_10), past the code,
 ' to the policy search. Says so and answers False when it cannot.
-Private Function CrownPgSignIn(ByVal drv As ChromeDriver) As Boolean
+Public Function CrownPgSignIn(ByVal drv As ChromeDriver) As Boolean
     Dim Keys As New Selenium.Keys
     Dim wsInput As Worksheet
     Dim answer As String, started As Date
@@ -1568,7 +1568,7 @@ End Sub
 
 ' Signs in to First Acceptance (USER_25 / PASS_25 at URL_31), past the
 ' code, to the Action Hub. Says so and answers False when it cannot.
-Private Function CrownFaSignIn(ByVal drv As ChromeDriver) As Boolean
+Public Function CrownFaSignIn(ByVal drv As ChromeDriver) As Boolean
     Dim Keys As New Selenium.Keys
     Dim wsInput As Worksheet
     Dim answer As String, started As Date

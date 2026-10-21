@@ -23,6 +23,9 @@ Option Explicit
 
 Private Const MOST_LINES As Long = 1500
 
+' True while a pull is filling a NEW Edit Data row (compare against nothing).
+Private mPullBlank As Boolean
+
 Public Sub CrownRecordPolicyPages()
     Dim policyNo As String
     Dim ws As Worksheet, wsInput As Worksheet
@@ -350,7 +353,7 @@ End Function
 ' wrote down on 17 Oct: the drivers (principal and the others, excluded
 ' or not), the vehicles, each vehicle's collision/comprehensive
 ' deductibles and the lienholders - and lists every place Edit Data says
-' something different on the UnitedPull sheet. Nothing changes until Yes
+' something different on the PolicyPull sheet. Nothing changes until Yes
 ' is pressed; then the new values go onto Edit Data and the customer is
 ' saved with his own Update (UpdateDataToOutput).
 '
@@ -426,10 +429,33 @@ Public Sub CrownPullUnitedPolicy()
         Exit Sub
     End If
 
-    ' --- what United says -------------------------------------------------
+    CrownPullApply answer, policyNo, "United", False
+    Exit Sub
+
+Finish:
+    On Error Resume Next
+    drv.Quit
+End Sub
+
+' Compares what a carrier's policy page said (the lines its reader
+' returns) with Edit Data, lists it on the PolicyPull sheet, and on Yes
+' puts it on Edit Data - into the customer open there, or a new row.
+Private Sub CrownPullApply(ByVal answer As String, ByVal policyNo As String, ByVal carrier As String, ByVal newRow As Boolean)
+    Dim wsEdit As Worksheet, ws As Worksheet
+    Dim lines() As String, f() As String
+    Dim changes As Collection, notes As Collection, ch As Variant
+    Dim drivers As Collection, vehicles As Collection, covers As Collection, liens As Collection
+    Dim insured As Variant, addr As Variant, k As Long, row As Long, shown As String, n As Long
+    Dim dCols As Variant, vCols As Variant, col As String, item As Variant
+
+    Set wsEdit = ThisWorkbook.Worksheets("Edit Data")
+    mPullBlank = newRow
+
+    ' --- what the carrier says -------------------------------------------------
     Set drivers = New Collection: Set vehicles = New Collection
     Set covers = New Collection: Set liens = New Collection
     insured = Array("", "", "", "", "", "", "")
+    addr = Array("", "", "", "", "")
 
     lines = Split(answer, vbLf)
     For k = 0 To UBound(lines)
@@ -437,12 +463,13 @@ Public Sub CrownPullUnitedPolicy()
         Select Case f(0)
             Case "INS": insured = f
             Case "DRV"
-                ' only drivers United still has on the policy
+                ' only drivers the carrier still has on the policy
                 If Len(f(8)) = 0 Or InStr(1, f(8), "active", vbTextCompare) > 0 Then drivers.Add f
             Case "VEH"
                 If Len(f(5)) = 0 Or InStr(1, f(5), "active", vbTextCompare) > 0 Then vehicles.Add f
             Case "COV": covers.Add f
             Case "LIEN": liens.Add f
+            Case "ADDR": addr = f
         End Select
     Next k
 
@@ -452,14 +479,22 @@ Public Sub CrownPullUnitedPolicy()
     dCols = Array("D", "F", "H", "J")
     vCols = Array("P", "R", "T", "V")
 
+    If newRow Then CrownPullAdd changes, wsEdit, "H7", "Insurance Company", carrier
     CrownPullAdd changes, wsEdit, "C7", "Policy No", Trim$(CStr(insured(6)))
     CrownPullAdd changes, wsEdit, "H8", "Phone", CrownPullPhone(CStr(insured(3)))
     CrownPullAdd changes, wsEdit, "C8", "Email", LCase$(Trim$(CStr(insured(4))))
-    If Len(insured(2)) > 0 Then notes.Add "United's mailing address: " & insured(2) & " (address not changed - check it by eye)"
+    If Len(insured(2)) > 0 Then If Len(addr(1)) > 0 Then
+        CrownPullAdd changes, wsEdit, "C9", "Address", UCase$(CStr(addr(1)))
+        CrownPullAdd changes, wsEdit, "C10", "City", UCase$(CStr(addr(2)))
+        CrownPullAdd changes, wsEdit, "K10", "State", UCase$(CStr(addr(3)))
+        CrownPullAdd changes, wsEdit, "H10", "ZIP Code", CStr(addr(4))
+    ElseIf Len(insured(2)) > 0 Then
+        notes.Add carrier & "'s mailing address: " & insured(2) & " (address not changed - check it by eye)"
+    End If
 
     For k = 1 To drivers.Count
         If k > 4 Then
-            notes.Add "United has more than 4 drivers - driver " & k & " (" & drivers(k)(1) & ") has no column on Edit Data"
+            notes.Add carrier & " has more than 4 drivers - driver " & k & " (" & drivers(k)(1) & ") has no column on Edit Data"
             Exit For
         End If
 
@@ -474,10 +509,10 @@ Public Sub CrownPullUnitedPolicy()
         End If
 
         If Len(item(1)) > 0 Then
-            CrownPullAdd changes, wsEdit, col & "18", "Driver " & k & " - first name", CrownPullFirst(CStr(item(1)))
-            CrownPullAdd changes, wsEdit, col & "19", "Driver " & k & " - last name", CrownPullLast(CStr(item(1)))
+            CrownPullAdd changes, wsEdit, col & "18", "Driver " & k & " - first name", UCase$(CrownPullFirst(CStr(item(1))))
+            CrownPullAdd changes, wsEdit, col & "19", "Driver " & k & " - last name", UCase$(CrownPullLast(CStr(item(1))))
         Else
-            notes.Add "United did not show driver " & k & "'s name (DOB " & item(2) & ") - name left as it is"
+            notes.Add carrier & " did not show driver " & k & "'s name (DOB " & item(2) & ") - name left as it is"
         End If
 
         CrownPullAdd changes, wsEdit, col & "20", "Driver " & k & " - gender", CrownPullPick(CStr(item(3)), "Male,Female")
@@ -491,14 +526,14 @@ Public Sub CrownPullUnitedPolicy()
         If k >= 2 Then
             If UCase$(Trim$(wsEdit.Range(dCols(k - 1) & "16").Text)) = "YES" Then
                 notes.Add "Edit Data has driver " & k & " (" & Trim$(wsEdit.Range(dCols(k - 1) & "18").Text & " " & wsEdit.Range(dCols(k - 1) & "19").Text) & _
-                          ") that United does not - left as it is"
+                          ") that " & carrier & " does not - left as it is"
             End If
         End If
     Next k
 
     For k = 1 To vehicles.Count
         If k > 4 Then
-            notes.Add "United has more than 4 vehicles - vehicle " & k & " has no column on Edit Data"
+            notes.Add carrier & " has more than 4 vehicles - vehicle " & k & " has no column on Edit Data"
             Exit For
         End If
 
@@ -507,14 +542,14 @@ Public Sub CrownPullUnitedPolicy()
 
         If k > 1 Then CrownPullAdd changes, wsEdit, col & "16", "Vehicle " & k & " - is there a vehicle", "Yes"
         CrownPullAdd changes, wsEdit, col & "17", "Vehicle " & k & " - VIN", UCase$(CStr(item(1)))
-        CrownPullAdd changes, wsEdit, col & "18", "Vehicle " & k & " - make", CStr(item(3))
+        CrownPullAdd changes, wsEdit, col & "18", "Vehicle " & k & " - make", UCase$(CStr(item(3)))
         CrownPullAdd changes, wsEdit, col & "19", "Vehicle " & k & " - year", CStr(item(2))
-        CrownPullAdd changes, wsEdit, col & "20", "Vehicle " & k & " - model", CStr(item(4))
+        CrownPullAdd changes, wsEdit, col & "20", "Vehicle " & k & " - model", UCase$(CStr(item(4)))
 
         If k <= covers.Count Then
             answer = CrownPullDeductible(CStr(covers(k)(2)), CStr(covers(k)(3)))
             If Left$(answer, 1) = "?" Then
-                notes.Add "Vehicle " & k & ": United has collision " & covers(k)(2) & " / comprehensive " & covers(k)(3) & _
+                notes.Add "Vehicle " & k & ": " & carrier & " has collision " & covers(k)(2) & " / comprehensive " & covers(k)(3) & _
                           " - not one of Edit Data's choices, deductible left as it is"
             Else
                 CrownPullAdd changes, wsEdit, col & "23", "Vehicle " & k & " - deductible", answer
@@ -531,12 +566,12 @@ Public Sub CrownPullUnitedPolicy()
     Next k
 
     If liens.Count > 0 And vehicles.Count > 1 Then
-        notes.Add "United lists lienholders without saying which vehicle each is for - they were matched in order, check them"
+        notes.Add carrier & " lists lienholders without saying which vehicle each is for - they were matched in order, check them"
     End If
 
     ' --- the report ---------------------------------------------------------
     Set ws = CrownPullSheet()
-    ws.Range("A1:E1").value = Array("Edit Data cell", "What", "Edit Data has", "United says", "Done")
+    ws.Range("A1:E1").value = Array("Edit Data cell", "What", "Edit Data has", carrier & " says", "Done")
     row = 2
 
     For Each ch In changes
@@ -562,21 +597,24 @@ Public Sub CrownPullUnitedPolicy()
     If ws.Columns("B").ColumnWidth > 60 Then ws.Columns("B").ColumnWidth = 60
 
     If changes.Count = 0 Then
-        MsgBox "Edit Data already matches United for " & policyNo & "." & IIf(notes.Count > 0, vbCrLf & vbCrLf & notes.Count & " note(s) on the UnitedPull sheet.", ""), _
+        MsgBox "Edit Data already matches " & carrier & " for " & policyNo & "." & IIf(notes.Count > 0, vbCrLf & vbCrLf & notes.Count & " note(s) on the PolicyPull sheet.", ""), _
                vbInformation, "Crown Superior"
+        mPullBlank = False
         Exit Sub
     End If
 
-    If n > 14 Then shown = shown & "... and " & (n - 14) & " more (all on the UnitedPull sheet)" & vbCrLf
+    If n > 14 Then shown = shown & "... and " & (n - 14) & " more (all on the PolicyPull sheet)" & vbCrLf
 
-    If MsgBox(changes.Count & " difference(s) between Edit Data and United for " & policyNo & ":" & vbCrLf & vbCrLf & shown & vbCrLf & _
-              IIf(notes.Count > 0, notes.Count & " note(s) on the UnitedPull sheet." & vbCrLf & vbCrLf, "") & _
-              "Put United's values on Edit Data and save this customer now?", vbYesNo + vbQuestion, "Crown Superior") = vbNo Then
+    If MsgBox(changes.Count & IIf(newRow, " value(s) from " & carrier & " for a NEW Edit Data row - ", " difference(s) between Edit Data and " & carrier & " for ") & policyNo & ":" & vbCrLf & vbCrLf & shown & vbCrLf & _
+              IIf(notes.Count > 0, notes.Count & " note(s) on the PolicyPull sheet." & vbCrLf & vbCrLf, "") & _
+              IIf(newRow, "Start the new row with these values and save it now?", "Put " & carrier & "'s values on Edit Data and save this customer now?"), vbYesNo + vbQuestion, "Crown Superior") = vbNo Then
         ws.Activate
+        mPullBlank = False
         Exit Sub
     End If
 
-    ' --- apply, then save with his own Update ------------------------------
+    ' --- apply, then save with his own Update (or his Send, for a new row) --
+    If newRow Then ClearInputFields
     Application.EnableEvents = False
     row = 2
     For Each ch In changes
@@ -591,12 +629,31 @@ Public Sub CrownPullUnitedPolicy()
     Application.EnableEvents = True
 
     wsEdit.Activate
-    UpdateDataToOutput
-    Exit Sub
 
-Finish:
-    On Error Resume Next
-    drv.Quit
+    If Not newRow Then
+        UpdateDataToOutput
+        mPullBlank = False
+        Exit Sub
+    End If
+
+    SendDataToOutput
+    CrownPullShowNewRow wsEdit, CrownDigits(policyNo)
+    mPullBlank = False
+End Sub
+
+' After his Send: show the new row on Edit Data (its number in C5).
+Private Sub CrownPullShowNewRow(ByVal wsEdit As Worksheet, ByVal digits As String)
+    Dim wsOut As Worksheet, r As Long
+
+    Set wsOut = ThisWorkbook.Worksheets("Output")
+
+    For r = wsOut.Cells(wsOut.Rows.Count, colPolicyNo).End(xlUp).Row To 2 Step -1
+        If CrownDigits(CStr(wsOut.Cells(r, colPolicyNo).value)) = digits Then
+            wsEdit.Range("C5").value = r
+            MsgBox "Saved as a new customer - row " & r & " of Output, now open on Edit Data.", vbInformation, "Crown Superior"
+            Exit Sub
+        End If
+    Next r
 End Sub
 
 ' One difference: Array(cell, what, Edit Data has, United says, is a date).
@@ -608,10 +665,11 @@ Private Sub CrownPullAdd(ByVal changes As Collection, ByVal ws As Worksheet, ByV
     If Len(united) = 0 Then Exit Sub
 
     have = Trim$(ws.Range(addr).Text)
+    If mPullBlank Then have = ""
 
     If asDate Then
         If Not IsDate(united) Then Exit Sub
-        If IsDate(ws.Range(addr).value) Then
+        If IsDate(ws.Range(addr).value) And Not mPullBlank Then
             If CDate(ws.Range(addr).value) = CDate(united) Then Exit Sub
         End If
         united = Format$(CDate(united), "mm/dd/yyyy")
@@ -675,7 +733,7 @@ Private Function CrownPullSheet() As Worksheet
     Dim ws As Worksheet
 
     For Each ws In ThisWorkbook.Worksheets
-        If StrComp(ws.Name, "UnitedPull", vbTextCompare) = 0 Then
+        If StrComp(ws.Name, "PolicyPull", vbTextCompare) = 0 Then
             ws.Cells.ClearContents
             Set CrownPullSheet = ws
             Exit Function
@@ -683,7 +741,7 @@ Private Function CrownPullSheet() As Worksheet
     Next ws
 
     Set ws = ThisWorkbook.Worksheets.Add(After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
-    ws.Name = "UnitedPull"
+    ws.Name = "PolicyPull"
     Set CrownPullSheet = ws
 End Function
 
@@ -722,4 +780,172 @@ Private Function CrownPullUnitedJs() As String
         "if(inLien){if(c.length===2&&c[0]&&!/Coverages|Information/i.test(c[0]))out.push('LIEN|'+c[0]+'|'+c[1]);else inLien=false;}}" & _
         "if(inCov)out.push('COV|'+cov+'|'+coll+'|'+comp);" & _
         "return out.join('\n');"
+End Function
+
+
+' =====================================================================
+' Pull a Progressive policy into Edit Data
+' ---------------------------------------------------------------------
+' Alt+F8 > CrownPullProgressivePolicy > Run, type the policy number.
+' Progressive has one page with everything (Tony, 21 Oct): Policy and
+' Coverages - the insured, address, phone, email, next amount due, the
+' people, the vehicles with VINs, each vehicle's comprehensive and
+' collision deductibles. Signs in like the payment run (code and all),
+' opens that page, opens every "Show more" so the driver details are in
+' it, and hands it to the same compare / apply as the United pull.
+'
+' Customers Progressive quoted straight through, who were never in Excel,
+' go into a NEW Edit Data row (saved with his own Send).
+' =====================================================================
+Public Sub CrownPullProgressivePolicy()
+    Dim wsEdit As Worksheet
+    Dim drv As ChromeDriver, clsDrv As Chrm
+    Dim policyNo As String, digits As String, answer As String, who As String
+    Dim newRow As Boolean, how As VbMsgBoxResult
+    Dim started As Date
+
+    Set wsEdit = ThisWorkbook.Worksheets("Edit Data")
+
+    policyNo = Trim$(InputBox("Progressive policy number to pull into Edit Data:", "Crown Superior", _
+                              IIf(InStr(1, wsEdit.Range("H7").Text, "progressive", vbTextCompare) > 0, Trim$(wsEdit.Range("C7").Text), "")))
+    digits = CrownDigits(policyNo)
+    If Len(digits) < 6 Then Exit Sub
+
+    who = Trim$(wsEdit.Range("D18").Text & " " & wsEdit.Range("D19").Text)
+
+    If Val(wsEdit.Range("C5").value) >= 2 And CrownDigits(wsEdit.Range("C7").Text) = digits Then
+        newRow = False
+    Else
+        how = MsgBox("Is " & digits & " a NEW customer for Excel?" & vbCrLf & vbCrLf & _
+                     "Yes = start a new Edit Data row for it" & vbCrLf & _
+                     "No = put it on the customer open on Edit Data now" & IIf(Len(who) > 0, " (" & who & ")", "") & vbCrLf & _
+                     "Cancel = stop", vbYesNoCancel + vbQuestion, "Crown Superior")
+        If how = vbCancel Then Exit Sub
+        newRow = (how = vbYes)
+
+        If Not newRow And Val(wsEdit.Range("C5").value) < 2 Then
+            MsgBox "Open the customer on Edit Data first (their row number in C5), then run this again.", vbExclamation, "Crown Superior"
+            Exit Sub
+        End If
+    End If
+
+    Set drv = CrownCodeDriver("Progressive", clsDrv)
+    If Not CrownChromeOk(drv) Then Exit Sub
+    If Not CrownPgSignIn(drv) Then GoTo Finish
+
+    drv.Get "https://policyservicing.apps.foragentsonly.com/app/policy-hub/" & digits & "/policy-and-coverages"
+
+    ' The page builds itself after it loads - wait for the vehicles.
+    started = Now
+    Do
+        answer = CStr(CrownPullJs(drv, "var t=(document.body&&document.body.innerText)||'';" & _
+                                       "return (/Policy and Coverages/.test(t)&&t.indexOf(arguments[0])>=0&&/\bVIN\s+[A-Z0-9]{17}/.test(t))?'ok':'';", digits))
+        If answer = "ok" Then Exit Do
+        drv.Wait 1000
+        DoEvents
+    Loop While (Now - started) * 86400 < 60
+
+    If answer <> "ok" Then
+        MsgBox "Progressive's Policy and Coverages page for " & digits & " did not come up, so nothing has been changed." & vbCrLf & _
+               "(Check the number. If it is right, send me a screenshot of what Chrome shows.)", vbExclamation, "Crown Superior"
+        GoTo Finish
+    End If
+
+    ' "Show more" on every driver and vehicle, twice (some open late).
+    CrownPullJs drv, CrownPgExpandJs()
+    drv.Wait 2500
+    CrownPullJs drv, CrownPgExpandJs()
+    drv.Wait 1500
+
+    answer = CStr(CrownPullJs(drv, CrownPgPullJs()))
+
+    On Error Resume Next
+    drv.Quit
+    On Error GoTo 0
+
+    If InStr(answer, "DRV|") = 0 And InStr(answer, "VEH|") = 0 Then
+        MsgBox "Could not read the drivers or vehicles on Progressive's page for " & digits & ", so nothing has been changed.", _
+               vbExclamation, "Crown Superior"
+        Exit Sub
+    End If
+
+    CrownPullApply answer, digits, "Progressive", newRow
+    Exit Sub
+
+Finish:
+    On Error Resume Next
+    drv.Quit
+End Sub
+
+Private Function CrownPullJs(ByVal drv As ChromeDriver, ByVal script As String, Optional ByVal arg As String = "") As String
+    Dim v As Variant
+
+    On Error Resume Next
+    If Len(arg) > 0 Then v = drv.ExecuteScript(script, arg) Else v = drv.ExecuteScript(script)
+    If Err.Number <> 0 Then v = ""
+    On Error GoTo 0
+
+    If IsNull(v) Or IsEmpty(v) Then v = ""
+    CrownPullJs = CStr(v)
+End Function
+
+Private Function CrownPgExpandJs() As String
+    CrownPgExpandJs = _
+        "var n=0;[].slice.call(document.querySelectorAll('button,a,[role=button]')).forEach(function(b){" & _
+        "var t=(b.innerText||'').trim(),a=b.getAttribute('aria-label')||'';" & _
+        "if((/^show more$/i.test(t)||/^show more details/i.test(a))&&b.getAttribute('aria-expanded')!=='true'){b.click();n++;}});return String(n);"
+End Function
+
+' Progressive's Policy and Coverages page -> the same lines as the United
+' reader, plus ADDR|street|city|state|zip.
+Private Function CrownPgPullJs() As String
+    Dim s As String
+
+    ' Read as lines of text, written so it works whether the page puts the
+    ' name, the address or the car on one line or several.
+    s = "var B=(document.body.innerText||'');var M=((document.querySelector('main')||document.body).innerText||'');" & _
+        "var L=M.split('\n').map(function(x){return x.replace(/\s+/g,' ').trim();}).filter(function(x){return x;});" & _
+        "var c=function(x){return (x||'').replace(/[|]/g,' ').replace(/\s+/g,' ').trim();};" & _
+        "var at=function(re,from,to){for(var i=from||0;i<(to||L.length);i++)if(re.test(L[i]))return i;return -1;};" & _
+        "var junk=/^(add a (driver|vehicle)|show (more|less)|remove|update|replace|driving record|people|vehicles|go to vehicle|help)/i;" & _
+        "var ST={alabama:'AL',alaska:'AK',arizona:'AZ',arkansas:'AR',california:'CA',colorado:'CO',connecticut:'CT',delaware:'DE',florida:'FL',georgia:'GA',hawaii:'HI',idaho:'ID',illinois:'IL',indiana:'IN',iowa:'IA',kansas:'KS',kentucky:'KY',louisiana:'LA',maine:'ME',maryland:'MD',massachusetts:'MA',michigan:'MI',minnesota:'MN',mississippi:'MS',missouri:'MO',montana:'MT',nebraska:'NE',nevada:'NV','new hampshire':'NH','new jersey':'NJ','new mexico':'NM','new york':'NY','north carolina':'NC','north dakota':'ND',ohio:'OH',oklahoma:'OK',oregon:'OR',pennsylvania:'PA','rhode island':'RI','south carolina':'SC','south dakota':'SD',tennessee:'TN',texas:'TX',utah:'UT',vermont:'VT',virginia:'VA',washington:'WA','west virginia':'WV',wisconsin:'WI',wyoming:'WY','district of columbia':'DC'};" & _
+        "var stOf=function(x){x=(x||'').trim();return ST[x.toLowerCase()]||(/^[A-Za-z]{2}$/.test(x)?x.toUpperCase():x);};" & _
+        "var out=[];var pol=((M.match(/Auto\s+(\d{6,})/)||[])[1])||'';" & _
+        "var stat=((B.match(/Primary named insured\s*([A-Za-z ]+?)\s*,/)||[])[1])||'';"
+    s = s & _
+        "var ci=at(/^Contact information/),pp=at(/^Paperless/,ci>0?ci:0);var cb=ci>=0?L.slice(ci+1,pp>ci?pp:ci+8).join('\n'):'';" & _
+        "var email=((cb.match(/[\w.+\-]+@[\w\-]+\.[\w.\-]+/)||[])[0])||'';var phone=((cb.match(/\((?:Mobile|Home|Work|Cell)\)\s*([\d\-\s().]{10,})/i)||[])[1])||'';" & _
+        "var rest=cb.replace(email,' ').replace(/\((?:Mobile|Home|Work|Cell)\)\s*[\d\-\s().]{10,}/i,' ').replace(/Update (Email|Phone Number|Address)/g,'\n');" & _
+        "var street='',city='',st='',zip='';var am=rest.match(/([^\n]*?\d[^\n]*?)\s*(\n\s*)?([A-Za-z .'\-]+),\s*([A-Za-z .]+?)\s+(\d{5})/);" & _
+        "if(am){street=am[1].trim();city=am[3].trim();st=stOf(am[4]);zip=am[5];" & _
+        "if(!am[2]){var sm=(street+' '+city).match(/^(.*\b(?:ST|STREET|AVE|AVENUE|RD|ROAD|DR|DRIVE|LN|LANE|CT|COURT|WAY|BLVD|PKWY|CIR|CIRCLE|PL|PLACE|TRL|TRAIL|HWY|TER|LOOP|RUN|PT|XING|SQ|PATH|ROW)\b(?:\s+(?:N|S|E|W|NE|NW|SE|SW))?(?:\s+(?:APT|UNIT|STE|#)\s*\S+)?)\s+(.+)$/i);" & _
+        "if(sm){street=sm[1];city=sm[2];}}}" & _
+        "var pay=((M.match(/Next amount due[^\n]*(\n[^\n]*)?/)||[])[0])||'';"
+    s = s & _
+        "var pe=at(/^People$/),ve=at(/^Vehicles$/,pe>0?pe:0),co=at(/^Vehicle Coverages$/,ve>0?ve:0);if(co<0)co=at(/^Coverages$/,ve>0?ve:0);" & _
+        "var who='';var dl=[];for(var i=(pe<0?0:pe);i<(ve>0?ve:L.length);i++){if(/^Date of birth$/i.test(L[i]))dl.push(i);}" & _
+        "dl.forEach(function(d,n){var role=L[d-1]||'',nm=L[d-2]||'';if(junk.test(nm))nm='';" & _
+        "if(nm&&!/\s/.test(nm)&&L[d-3]&&!junk.test(L[d-3]))nm=L[d-3]+' '+nm;" & _
+        "var end=(n+1<dl.length)?dl[n+1]-3:(ve>0?ve:L.length);var g='',ms='',lic='',ls='',rel='',dst='';" & _
+        "for(var k=d+2;k<end;k++){var lb=L[k].toLowerCase().replace(/:$/,''),v=L[k+1]||'';" & _
+        "if(/^(gender|sex)$/.test(lb))g=v;else if(/^marital/.test(lb))ms=v;else if(/(license|licence) (number|#|no\.?)$|^driver'?s license$/.test(lb))lic=v;" & _
+        "else if(/license state|state (licensed|of license)|licensed in/.test(lb))ls=stOf(v);else if(/^relationship/.test(lb))rel=v;else if(/^(driver )?status$/.test(lb))dst=v;}" & _
+        "if(n===0)who=nm;" & _
+        "out.push('DRV|'+[c(nm),c(L[d+1]),c(g),c(ms),c(lic),c(ls),c(role+(rel?' '+rel:'')),c(dst)].join('|'));});"
+    s = s & _
+        "var vEnd=co>0?co:L.length;var vl=[];for(var i=(ve<0?0:ve);i<vEnd;i++){if(/VIN\s+[A-HJ-NPR-Z0-9]{17}/i.test(L[i]))vl.push(i);}" & _
+        "vl.forEach(function(v,n){var vin=L[v].match(/VIN\s+([A-HJ-NPR-Z0-9]{17})/i)[1].toUpperCase();var desc=L[v].replace(/VIN\s+\S+/i,'').trim();" & _
+        "if(!/^\d{4}\s/.test(desc)){var back=[];for(var k=v-1;k>=0&&back.length<3&&!junk.test(L[k]);k--)back.unshift(L[k]);desc=(back.join(' ')+' '+desc).trim();}" & _
+        "var ym=desc.match(/(\d{4})\s+(\S+)\s+(.+)$/)||['','','',''];out.push('VEH|'+[vin,ym[1],c(ym[2]),c(ym[3]),''].join('|'));" & _
+        "var end=(n+1<vl.length)?vl[n+1]:vEnd;for(var k=v+1;k<end;k++){if(/lien ?holder|loss payee|lessor/i.test(L[k])&&L[k+1]){" & _
+        "var adr=(L[k+2]&&/\d/.test(L[k+2])&&!junk.test(L[k+2]))?L[k+2]:'';out.push('LIEN|'+c(L[k+1])+'|'+c(adr));break;}}});" & _
+        "if(co>=0){var cv=0,coll='',comp='',ded=function(k){var v=L[k+1];if(/^help$/i.test(v||''))v=L[k+2];return /no coverage|not eligible|declined/i.test(v||'')?'0':((v||'').match(/\$?([\d,]+)\s*deductible/i)||['',''])[1].replace(/,/g,'');};" & _
+        "for(var i=co;i<L.length;i++){if(/VIN\s+[A-HJ-NPR-Z0-9]{17}/i.test(L[i])){if(cv)out.push('COV|'+cv+'|'+coll+'|'+comp);cv++;coll='';comp='';}" & _
+        "else if(cv&&/^Collision( Help)?$/i.test(L[i]))coll=ded(i);else if(cv&&/^Comprehensive( Help)?$/i.test(L[i]))comp=ded(i);else if(/^Total policy premium/i.test(L[i]))break;}if(cv)out.push('COV|'+cv+'|'+coll+'|'+comp);}"
+    s = s & _
+        "out.unshift('ADDR|'+[c(street),c(city),c(st),c(zip)].join('|'));" & _
+        "out.unshift('INS|'+[c(who),c(street+', '+city+' '+st+' '+zip),c(phone),c(email),c(stat),pol,''].join('|'));" & _
+        "out.push('PAY|'+c(pay));return out.join('\n');"
+
+    CrownPgPullJs = s
 End Function
