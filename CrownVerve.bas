@@ -152,7 +152,9 @@ Private Function CrownVerveFinish(ByVal drv As ChromeDriver, ByRef down As Strin
 
         ' "(R-833) Please select a Pay Plan." - pick it again and press Next
         ' once more before giving up (22 Oct: Samuel Mims stopped here).
-        If InStr(1, CrownVerveError(drv), "Pay Plan", vbTextCompare) > 0 And Not planRetried Then
+        ' "Please add a new card ..." means a card plan got chosen - same cure.
+        If (InStr(1, CrownVerveError(drv), "Pay Plan", vbTextCompare) > 0 Or _
+            InStr(1, CrownVerveError(drv), "card", vbTextCompare) > 0) And Not planRetried Then
             planRetried = True
             CrownVervePickPayPlan drv, True
             ClickElement drv, "btnNext", "ID"
@@ -539,6 +541,10 @@ End Sub
 
 ' The Pay Plan list on the billing page, when it is empty (or always,
 ' when force is set after Verve has said "Please select a Pay Plan").
+' The plan SELECTED here is the Direct Bill 16.67% one - his words:
+' "select payment plan direct bill pay 16.67%". The CC plan (VERVE_PLAN)
+' is only the row READ off the quote table afterwards; choosing it here
+' makes Verve ask for a card (22 Oct, Samuel Mims).
 ' The box is found by its id OR by the "Pay Plan" label beside it. The
 ' plan is chosen through Verve's own list control first (the reliable
 ' way on its DevExpress pages), then by clicking the row, then by typing.
@@ -568,14 +574,15 @@ Private Sub CrownVervePickPayPlan(ByVal drv As ChromeDriver, Optional ByVal forc
     ' 1. Verve's own list control.
     row = CStr(drv.ExecuteScript( _
         "function f(s){return (s||'').replace(/\s+/g,' ').trim().toLowerCase();}" & _
-        "var name=arguments[0].replace(/_I$/,''),want=f(arguments[1]),c=null;" & _
+        "var name=arguments[0].replace(/_I$/,''),c=null;" & _
         "try{c=(window.ASPx&&ASPx.GetControlCollection&&ASPx.GetControlCollection().Get(name))||window[name]||null;}catch(x){}" & _
-        "if(!c||!c.GetItemCount)return '';var best=-1;" & _
-        "for(var i=0;i<c.GetItemCount();i++){var t=f(c.GetItem(i).text);if(t===want){best=i;break;}if(best<0&&t.indexOf('16.67')>=0)best=i;}" & _
+        "function sc(t){if(t.indexOf('16.67')<0)return -1;var n=1;if(!/\bcc\b|card|credit/.test(t))n+=4;if(/direct|bill/.test(t))n+=2;return n;}" & _
+        "if(!c||!c.GetItemCount)return '';var best=-1,bs=-1;" & _
+        "for(var i=0;i<c.GetItemCount();i++){var v=sc(f(c.GetItem(i).text));if(v>bs){bs=v;best=i;}}" & _
         "if(best<0)return 'control: no 16.67 plan';c.SetSelectedIndex(best);" & _
         "try{if(c.RaiseSelectedIndexChanged)c.RaiseSelectedIndexChanged(true);}catch(x){}" & _
         "try{if(c.RaiseValueChangedEvent)c.RaiseValueChangedEvent();}catch(x){}" & _
-        "return 'control ok '+f(c.GetItem(best).text);", Array(box, VERVE_PLAN)))
+        "return 'control ok '+f(c.GetItem(best).text);", box))
     If Err.Number <> 0 Then row = ""
     Err.Clear
     drv.Wait 1200
@@ -588,12 +595,12 @@ Private Sub CrownVervePickPayPlan(ByVal drv As ChromeDriver, Optional ByVal forc
         row = CStr(drv.ExecuteScript( _
             "function f(s){return (s||'').replace(/\s+/g,' ').trim().toLowerCase();}" & _
             "var list=document.getElementById(arguments[0].replace(/_I$/,'_DDD_L_LBT'));" & _
-            "if(!list)return 'no list';var want=f(arguments[1]),best=null;" & _
+            "function sc(t){if(t.indexOf('16.67')<0)return -1;var n=1;if(!/\bcc\b|card|credit/.test(t))n+=4;if(/direct|bill/.test(t))n+=2;return n;}" & _
+            "if(!list)return 'no list';var best=null,bs=-1;" & _
             "var r=list.querySelectorAll('tr');" & _
-            "for(var i=0;i<r.length;i++){var t=f(r[i].innerText);" & _
-            "if(t===want){best=r[i];break;}if(!best&&t.indexOf('16.67')>=0)best=r[i];}" & _
+            "for(var i=0;i<r.length;i++){var v=sc(f(r[i].innerText));if(v>bs){bs=v;best=r[i];}}" & _
             "if(!best)return 'no 16.67 plan';" & _
-            "var c=best.querySelector('td')||best;c.click();return 'ok '+f(best.innerText);", Array(box, VERVE_PLAN)))
+            "var c=best.querySelector('td')||best;c.click();return 'ok '+f(best.innerText);", box))
         If Err.Number <> 0 Then row = "error: " & Err.Description
         Err.Clear
         drv.Wait 800
@@ -603,7 +610,7 @@ Private Sub CrownVervePickPayPlan(ByVal drv As ChromeDriver, Optional ByVal forc
     Err.Clear
 
     ' 3. Still empty: type it, the way a person would.
-    If InStr(1, boxNow, "16.67", vbTextCompare) = 0 Then
+    If InStr(1, boxNow, "16.67", vbTextCompare) = 0 Or InStr(1, boxNow, "CC", vbBinaryCompare) > 0 Then
         drv.FindElementById(box).Clear
         drv.FindElementById(box).SendKeys "5 Pay 16.67"
         drv.Wait 900

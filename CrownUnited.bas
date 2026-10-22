@@ -542,3 +542,81 @@ End Function
 Private Function CrownMoney(ByVal value As Double) As String
     CrownMoney = Replace(Format$(value, "0.00"), ",", ".")
 End Function
+
+
+' The Odometer Reading box for one vehicle on United's application page.
+' United now stops with "Please enter miles." when it is empty (22 Oct,
+' Samuel Mims) and nothing typed it - the request's Mileage was never
+' used. Taken from the Output column headed "Mileage" (vehicle 1) or
+' "Mileage veh N", found by its heading so no column number is assumed.
+' A box United has already filled is left alone; a blank Mileage on the
+' request is said plainly instead of guessed at.
+Public Sub CrownUnitedOdometer(ByVal drv As Object, ByVal vehNo As Long, ByRef arData As Variant, ByVal i As Long)
+    Dim col As Long, miles As String, el As Object, have As String
+
+    col = CrownOutputColumn(IIf(vehNo = 1, "Mileage", "Mileage veh " & vehNo))
+
+    On Error Resume Next
+    If col > 0 Then miles = CrownDigits(CStr(arData(i, col)))
+
+    Set el = drv.ExecuteScript( _
+        "var n=arguments[0],vis=function(e){return !!e.getClientRects().length;};" & _
+        "var a=[].slice.call(document.querySelectorAll('input[type=text],input:not([type])')).filter(function(e){return vis(e)&&/odom/i.test(e.id+' '+e.name);});" & _
+        "if(a.length>=n)return a[n-1];" & _
+        "var w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT),t,k=0;" & _
+        "while((t=w.nextNode())){if(/odometer\s*reading/i.test(t.nodeValue)){k++;if(k===n){" & _
+        "var all=[].slice.call(document.querySelectorAll('input')).filter(vis);" & _
+        "for(var j=0;j<all.length;j++){if(t.compareDocumentPosition(all[j])&4)return all[j];}}}}" & _
+        "return null;", vehNo)
+    If Err.Number <> 0 Then Set el = Nothing
+    Err.Clear
+
+    If el Is Nothing Then
+        On Error GoTo 0
+        Exit Sub
+    End If
+
+    have = CrownDigits(CStr(el.Value))
+    Err.Clear
+
+    If Len(have) > 0 Then
+        On Error GoTo 0
+        Exit Sub
+    End If
+
+    If Len(miles) = 0 Then
+        On Error GoTo 0
+        CrownLastAlert = "United needs the odometer reading for vehicle " & vehNo & " and Mileage is blank on the request"
+        CrownNoteBlocker CrownLastAlert
+        Exit Sub
+    End If
+
+    el.Clear
+    el.SendKeys miles
+    Err.Clear
+    On Error GoTo 0
+
+    CrownNoteBlocker "United: odometer for vehicle " & vehNo & " typed from Mileage (" & miles & ")"
+End Sub
+
+' The number of the Output column with this heading (spaces and case
+' ignored), or 0.
+Private Function CrownOutputColumn(ByVal heading As String) As Long
+    Dim ws As Worksheet, c As Long, last As Long, want As String
+
+    want = LCase$(Replace(heading, " ", ""))
+
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets("Output")
+    On Error GoTo 0
+    If ws Is Nothing Then Exit Function
+
+    last = ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column
+
+    For c = 1 To last
+        If LCase$(Replace(CStr(ws.Cells(1, c).Value), " ", "")) = want Then
+            CrownOutputColumn = c
+            Exit Function
+        End If
+    Next c
+End Function
