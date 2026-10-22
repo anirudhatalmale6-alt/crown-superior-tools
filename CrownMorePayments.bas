@@ -1614,6 +1614,68 @@ End Function
 ' The pages a "pull into Edit Data" would read, saved for me - same as
 ' CrownNatGenLook. Open a customer's policy pages (drivers, vehicles,
 ' coverages, lienholder) and press OK on each.
+' Assurance America and Trexis: sign in the way their payment runs do,
+' then save the pages Tony opens (a customer's drivers, vehicles,
+' coverages, lienholder) so their "pull into Edit Data" can be built.
+Public Sub CrownAssuranceLook()
+    Dim drv As ChromeDriver, clsDrv As Chrm
+    Dim Keys As New Selenium.Keys
+    Dim wsInput As Worksheet
+
+    Set wsInput = ThisWorkbook.Worksheets("Input")
+    Set drv = CrownCodeDriver(AA_CARRIER, clsDrv)
+    If Not CrownChromeOk(drv) Then Exit Sub
+
+    drv.Get wsInput.Range("URL_11").value
+
+    If CrownMoreWaitJs(drv, "return (document.querySelector(""input[formcontrolname='username']"")&&" & _
+                            "document.querySelector(""input[formcontrolname='password']""))?'ok':'';", 60) Then
+        EnterData drv, Keys, "//input[@formcontrolname='username']", wsInput.Range("USER_7").value, "XPATH"
+        EnterData drv, Keys, "//input[@formcontrolname='password']", wsInput.Range("PASS_7").value, "XPATH"
+        ClickElement drv, "//*[@id='login-button']", "XPATH"
+        drv.Wait 4000
+    End If
+
+    If CrownCodeWait(drv, AA_CARRIER, "return document.querySelector(""input[formcontrolname='password']"")?'':'ok';", 120) Then
+        CrownLookPages drv, AA_CARRIER
+    Else
+        MsgBox "Did not get past Assurance America's sign-in. Send me a screenshot of what it shows.", vbExclamation, "Crown Superior"
+    End If
+
+    On Error Resume Next
+    drv.Quit
+    On Error GoTo 0
+End Sub
+
+Public Sub CrownTrexisLook()
+    Dim drv As ChromeDriver, clsDrv As Chrm
+    Dim Keys As New Selenium.Keys
+    Dim wsInput As Worksheet
+
+    Set wsInput = ThisWorkbook.Worksheets("Input")
+    Set drv = CrownCodeDriver(TX_CARRIER, clsDrv)
+    If Not CrownChromeOk(drv) Then Exit Sub
+
+    drv.Get wsInput.Range("URL_8").value
+
+    If CrownMoreWaitJs(drv, "return (document.getElementById('loginName')&&document.getElementById('loginPassword'))?'ok':'';", 60) Then
+        EnterData drv, Keys, "loginName", wsInput.Range("USER_6").value, "ID"
+        EnterData drv, Keys, "loginPassword", wsInput.Range("PASS_6").value, "ID"
+        drv.Wait 1000
+        ClickElement drv, "//*[@id='loginSubmit']/div[1]/button", "XPATH"
+    End If
+
+    If CrownCodeWait(drv, TX_CARRIER, "return document.getElementById('agentHomePolicyButton')?'ok':'';", 120) Then
+        CrownLookPages drv, TX_CARRIER
+    Else
+        MsgBox "Did not get past Trexis's sign-in. Send me a screenshot of what it shows.", vbExclamation, "Crown Superior"
+    End If
+
+    On Error Resume Next
+    drv.Quit
+    On Error GoTo 0
+End Sub
+
 Public Sub CrownProgressiveLook()
     Dim drv As ChromeDriver, clsDrv As Chrm
 
