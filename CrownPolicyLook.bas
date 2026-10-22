@@ -418,6 +418,17 @@ Public Sub CrownPullUnitedPolicy()
     answer = CStr(drv.ExecuteScript(CrownPullUnitedJs()))
     On Error GoTo 0
 
+    ' "GAI 206097" found nothing, "206097" did (Tony, 22 Oct) - so when the
+    ' number has letters in front and nothing came back, try the digits.
+    If InStr(answer, "DRV|") = 0 And InStr(answer, "VEH|") = 0 And CrownDigits(policyNo) <> policyNo Then
+        drv.Get CrownLookUnitedUrl(drv, CrownDigits(policyNo))
+        CrownLookSettle drv, 6000
+
+        On Error Resume Next
+        answer = CStr(drv.ExecuteScript(CrownPullUnitedJs()))
+        On Error GoTo 0
+    End If
+
     On Error Resume Next
     drv.Quit
     On Error GoTo 0
@@ -486,7 +497,7 @@ Private Sub CrownPullApply(ByVal answer As String, ByVal policyNo As String, ByV
     CrownPullAdd changes, wsEdit, "C7", "Policy No", Trim$(CStr(insured(6)))
     CrownPullAdd changes, wsEdit, "H8", "Phone", CrownPullPhone(CStr(insured(3)))
     CrownPullAdd changes, wsEdit, "C8", "Email", LCase$(Trim$(CStr(insured(4))))
-    If Len(insured(2)) > 0 Then If Len(addr(1)) > 0 Then
+    If Len(insured(2)) > 0 And Len(addr(1)) > 0 Then
         CrownPullAdd changes, wsEdit, "C9", "Address", UCase$(CStr(addr(1)))
         CrownPullAdd changes, wsEdit, "C10", "City", UCase$(CStr(addr(2)))
         CrownPullAdd changes, wsEdit, "K10", "State", UCase$(CStr(addr(3)))
