@@ -101,6 +101,7 @@ Private Function CrownVerveFinish(ByVal drv As ChromeDriver, ByRef down As Strin
     Dim page As String, was As String
     Dim pages As Long, same As Long
     Dim popup As String
+    Dim planRetried As Boolean
 
     page = CrownVervePageText(drv)
 
@@ -147,6 +148,16 @@ Private Function CrownVerveFinish(ByVal drv As ChromeDriver, ByRef down As Strin
 
         If Len(popup) > 0 Then
             CrownNoteBlocker "Verve said (on Next): " & Left$(popup, 200)
+        End If
+
+        ' "(R-833) Please select a Pay Plan." - pick it again and press Next
+        ' once more before giving up (22 Oct: Samuel Mims stopped here).
+        If InStr(1, CrownVerveError(drv), "Pay Plan", vbTextCompare) > 0 And Not planRetried Then
+            planRetried = True
+            CrownVervePickPayPlan drv, True
+            ClickElement drv, "btnNext", "ID"
+            CrownVerveSettle drv
+            CrownVerveTakeAlert drv, False
         End If
 
         ' A red error on the page means Verve refused to move on.
@@ -510,7 +521,7 @@ Private Sub CrownVerveBilling(ByVal drv As ChromeDriver)
 
     ' Sometimes Verve leaves the Pay Plan empty and Next answers
     ' "(R-833) Please select a Pay Plan." - pick ours.
-    CrownVervePickPayPlan drv
+    CrownVervePickPayPlan drv, False
 
     On Error Resume Next
     blank = drv.ExecuteScript( _
@@ -526,49 +537,85 @@ Private Sub CrownVerveBilling(ByVal drv As ChromeDriver)
 End Sub
 
 
-' The Pay Plan list on the billing page, when it is empty: open it the way
-' FillVerve opens Verve's lists (click the box), then click the row for
-' VERVE_PLAN - or, if that exact wording is not there, the 16.67% one.
-Private Sub CrownVervePickPayPlan(ByVal drv As ChromeDriver)
-    Dim box As String, row As String, now_ As String
+' The Pay Plan list on the billing page, when it is empty (or always,
+' when force is set after Verve has said "Please select a Pay Plan").
+' The box is found by its id OR by the "Pay Plan" label beside it. The
+' plan is chosen through Verve's own list control first (the reliable
+' way on its DevExpress pages), then by clicking the row, then by typing.
+Private Sub CrownVervePickPayPlan(ByVal drv As ChromeDriver, Optional ByVal force As Boolean = False)
+    Dim box As String, row As String, boxNow As String
+    Dim Keys As New Selenium.Keys
 
     On Error Resume Next
     box = CStr(drv.ExecuteScript( _
-        "var t=document.querySelectorAll('input[id$=""_I""]');" & _
-        "for(var i=0;i<t.length;i++){var e=t[i];if(!/pay_?plan/i.test(e.id))continue;" & _
-        "if(!e.getClientRects().length)continue;" & _
-        "var v=(e.value||'').trim();if(v&&!/^(select|-+|none)$/i.test(v))return '';" & _
-        "return e.id;}return '';"))
+        "var force=arguments[0]==='1';var vis=function(e){return !!e.getClientRects().length;};" & _
+        "var cands=[].slice.call(document.querySelectorAll('input[id$=""_I""]')).filter(function(e){return /pay_?plan/i.test(e.id)&&vis(e);});" & _
+        "if(!cands.length){[].slice.call(document.querySelectorAll('td,span,label,div')).forEach(function(l){" & _
+        "if(cands.length||l.children.length>2)return;if(!/^\s*\*?\s*pay\s*plan\s*:?\s*\*?\s*$/i.test(l.innerText||''))return;" & _
+        "var tr=l.closest('tr')||l.parentNode;var i=tr&&[].slice.call(tr.querySelectorAll('input[id$=""_I""]')).filter(vis)[0];if(i)cands.push(i);});}" & _
+        "var e=cands[0];if(!e)return '';var v=(e.value||'').trim();" & _
+        "if(!force&&v&&!/^(select|-+|none)$/i.test(v))return '';return e.id;", IIf(force, "1", "0")))
     If Err.Number <> 0 Then box = ""
     Err.Clear
 
     If Len(box) = 0 Then
         On Error GoTo 0
+        If force Then CrownNoteBlocker "Verve billing: Verve asked for a Pay Plan but no Pay Plan box could be found"
 
         Exit Sub
     End If
 
-    drv.FindElementById(box).Click
-    drv.Wait 700
-
+    ' 1. Verve's own list control.
     row = CStr(drv.ExecuteScript( _
         "function f(s){return (s||'').replace(/\s+/g,' ').trim().toLowerCase();}" & _
-        "var list=document.getElementById(arguments[0].replace(/_I$/,'_DDD_L_LBT'));" & _
-        "if(!list)return 'no list';var want=f(arguments[1]),best=null;" & _
-        "var r=list.querySelectorAll('tr');" & _
-        "for(var i=0;i<r.length;i++){var t=f(r[i].innerText);" & _
-        "if(t===want){best=r[i];break;}if(!best&&t.indexOf('16.67')>=0)best=r[i];}" & _
-        "if(!best)return 'no 16.67 plan';" & _
-        "var c=best.querySelector('td')||best;c.click();return 'ok '+f(best.innerText);", Array(box, VERVE_PLAN)))
-    If Err.Number <> 0 Then row = "error: " & Err.Description
+        "var name=arguments[0].replace(/_I$/,''),want=f(arguments[1]),c=null;" & _
+        "try{c=(window.ASPx&&ASPx.GetControlCollection&&ASPx.GetControlCollection().Get(name))||window[name]||null;}catch(x){}" & _
+        "if(!c||!c.GetItemCount)return '';var best=-1;" & _
+        "for(var i=0;i<c.GetItemCount();i++){var t=f(c.GetItem(i).text);if(t===want){best=i;break;}if(best<0&&t.indexOf('16.67')>=0)best=i;}" & _
+        "if(best<0)return 'control: no 16.67 plan';c.SetSelectedIndex(best);" & _
+        "try{if(c.RaiseSelectedIndexChanged)c.RaiseSelectedIndexChanged(true);}catch(x){}" & _
+        "try{if(c.RaiseValueChangedEvent)c.RaiseValueChangedEvent();}catch(x){}" & _
+        "return 'control ok '+f(c.GetItem(best).text);", Array(box, VERVE_PLAN)))
+    If Err.Number <> 0 Then row = ""
+    Err.Clear
+    drv.Wait 1200
+
+    ' 2. Open the list and click the row.
+    If Left$(row, 10) <> "control ok" Then
+        drv.FindElementById(box).Click
+        drv.Wait 700
+
+        row = CStr(drv.ExecuteScript( _
+            "function f(s){return (s||'').replace(/\s+/g,' ').trim().toLowerCase();}" & _
+            "var list=document.getElementById(arguments[0].replace(/_I$/,'_DDD_L_LBT'));" & _
+            "if(!list)return 'no list';var want=f(arguments[1]),best=null;" & _
+            "var r=list.querySelectorAll('tr');" & _
+            "for(var i=0;i<r.length;i++){var t=f(r[i].innerText);" & _
+            "if(t===want){best=r[i];break;}if(!best&&t.indexOf('16.67')>=0)best=r[i];}" & _
+            "if(!best)return 'no 16.67 plan';" & _
+            "var c=best.querySelector('td')||best;c.click();return 'ok '+f(best.innerText);", Array(box, VERVE_PLAN)))
+        If Err.Number <> 0 Then row = "error: " & Err.Description
+        Err.Clear
+        drv.Wait 800
+    End If
+
+    boxNow = CStr(drv.FindElementById(box).Value)
     Err.Clear
 
-    drv.Wait 800
-    now_ = CStr(drv.FindElementById(box).Value)
-    Err.Clear
+    ' 3. Still empty: type it, the way a person would.
+    If InStr(1, boxNow, "16.67", vbTextCompare) = 0 Then
+        drv.FindElementById(box).Clear
+        drv.FindElementById(box).SendKeys "5 Pay 16.67"
+        drv.Wait 900
+        drv.FindElementById(box).SendKeys Keys.Enter
+        drv.Wait 1200
+        boxNow = CStr(drv.FindElementById(box).Value)
+        row = row & " / typed"
+        Err.Clear
+    End If
     On Error GoTo 0
 
-    CrownNoteBlocker "Verve billing: the Pay Plan was empty - " & row & " (box now: " & now_ & ")"
+    CrownNoteBlocker "Verve billing: Pay Plan " & IIf(force, "(asked for again)", "was empty") & " - " & row & " (box now: " & boxNow & ")"
 End Sub
 
 
