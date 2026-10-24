@@ -459,8 +459,10 @@ Private Sub CrownPullApply(ByVal answer As String, ByVal policyNo As String, ByV
     Dim insured As Variant, addr As Variant, k As Long, row As Long, shown As String, n As Long
     Dim dCols As Variant, vCols As Variant, col As String, item As Variant
     Dim vNames As Collection, vn As Variant, w() As String
+    Dim keepRow As Variant, failed As String
 
     Set wsEdit = ThisWorkbook.Worksheets("Edit Data")
+    keepRow = wsEdit.Range("C5").value
     mPullBlank = newRow
     Set vNames = New Collection
 
@@ -636,21 +638,55 @@ Private Sub CrownPullApply(ByVal answer As String, ByVal policyNo As String, ByV
     End If
 
     ' --- apply, then save with his own Update (or his Send, for a new row) --
-    If newRow Then ClearInputFields
+    ' Edit Data's own Activate code puts row 2 in C5 and reloads it. Going
+    ' back to Edit Data AFTER writing threw every value away and then saved
+    ' row 2 over itself (Tony, 24 Oct: "it didnt populate anything"). So:
+    ' go there first, with events off so that code does not run, and make
+    ' sure the customer we compared against is still the one open.
     Application.EnableEvents = False
+    On Error Resume Next
+    wsEdit.Activate
+    On Error GoTo 0
+
+    If Not newRow And CStr(wsEdit.Range("C5").value) <> CStr(keepRow) Then
+        Application.EnableEvents = True
+        MsgBox "Edit Data moved off the customer (row " & keepRow & ") while " & carrier & " was being read, so nothing has been changed." & vbCrLf & _
+               "Put " & keepRow & " back in C5 and run this again.", vbExclamation, "Crown Superior"
+        mPullBlank = False
+        Exit Sub
+    End If
+
+    If newRow Then
+        ClearInputFields
+        Application.EnableEvents = False
+    End If
+
     row = 2
     For Each ch In changes
+        Err.Clear
+        On Error Resume Next
         If ch(4) Then
             wsEdit.Range(ch(0)).value = CDate(ch(3))
         Else
             wsEdit.Range(ch(0)).value = ch(3)
         End If
-        ws.Cells(row, 5).value = "yes"
+        If Err.Number <> 0 Then
+            failed = failed & "   " & ch(1) & " (" & ch(0) & "): " & Err.Description & vbCrLf
+            ws.Cells(row, 5).value = "NOT written"
+        Else
+            ws.Cells(row, 5).value = "yes"
+        End If
+        On Error GoTo 0
         row = row + 1
     Next ch
     Application.EnableEvents = True
 
-    wsEdit.Activate
+    If Len(failed) > 0 Then
+        MsgBox "These could not be written on Edit Data, so the customer has NOT been saved:" & vbCrLf & vbCrLf & failed & vbCrLf & _
+               "Everything else is on Edit Data now - check it, then press Update yourself.", vbExclamation, "Crown Superior"
+        mPullBlank = False
+        Exit Sub
+    End If
 
     If Not newRow Then
         UpdateDataToOutput
