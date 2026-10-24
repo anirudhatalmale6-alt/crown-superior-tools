@@ -113,6 +113,8 @@ var COLUMNS = {
   down_payment:    'down_payment',      // the down payment WITH the autoclub on it
   autoclub:        'auto_club',         // the amount added, on its own
   monthly_payment: 'monthly_payment',
+  carrier_down:    'amt_to_co',         // the carrier's own down payment (no autoclub) - "amt to co"
+  plan:            'quote_plan',        // autopay or direct - which plan the main columns are
   msg_to_customer: 'msg_to_customer',
   quote_link:      'quote_link',
   request_id:      'website_request_id' // already on the sheet, column BG
@@ -185,6 +187,26 @@ function doPost(e) {
       if (value === undefined || value === null || value === '') { continue; }
 
       sheet.getRange(row, at + 1).setValue(value);
+      wrote++;
+    }
+
+    // Every quote in its own slot (24 Oct): united_autopay_down,
+    // united_direct_monthly, verve_autopay_amt_to_co, ... Written only
+    // where a heading of exactly that name exists - add the headings you
+    // want (row 1 of the quotes tab) and they fill in from the next quote.
+    // Slots: <carrier>_<autopay|direct>_<down|monthly|total|amt_to_co>
+    var slots = body.slots || {};
+
+    for (var slot in slots) {
+      if (!slots.hasOwnProperty(slot)) { continue; }
+
+      var slotAt = headings.indexOf(String(slot).trim().toLowerCase());
+      if (slotAt < 0) { continue; }
+
+      var slotValue = slots[slot];
+      if (slotValue === undefined || slotValue === null || slotValue === '') { continue; }
+
+      sheet.getRange(row, slotAt + 1).setValue(slotValue);
       wrote++;
     }
 
