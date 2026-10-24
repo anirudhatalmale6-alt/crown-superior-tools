@@ -185,6 +185,13 @@ Public Sub CrownRunQuotes()
         CrownLastStopReason = ""
         CrownLastAlert = ""
 
+        ' The request as it is on the website NOW - corrections made there
+        ' since it was first brought in are used (24 Oct).
+        On Error Resume Next
+        CrownRefreshQuoteById CLng(ids(i))
+        Err.Clear
+        On Error GoTo Finished
+
         loaded = CrownLoadQuoteById(CLng(ids(i)), who)
 
         If Not loaded Then
@@ -250,6 +257,7 @@ Public Sub CrownRunQuotes()
                 did = did + 1
                 inARow = 0
                 priced = True
+                CrownLogQuoteHistory carrier, down, monthly, term
                 note = Trim$(note & " sent: down " & down & ", monthly " & monthly)
             Else
                 failed = failed + 1
@@ -555,6 +563,7 @@ Private Function CrownRunVerve(ByVal ws As Worksheet, ByVal row As Long, _
         If InStr(1, answer, """ok"":true", vbTextCompare) > 0 Then
             CrownRunVerve = True
             note = note & " - sent"
+            CrownLogQuoteHistory "Verve", down, monthly, term
         Else
             note = note & " - the website refused it: " & Left$(answer, 90)
         End If
@@ -578,4 +587,56 @@ Public Sub CrownAutoNote(ByVal what As String)
 
     ws.Cells(row, 1).value = Now
     ws.Cells(row, 6).value = what
+End Sub
+
+
+' Every quote that goes out, written on Output History: the customer's
+' row as it stands on Output (row 2 - the one being quoted), the time,
+' and the carrier and figures in four columns of their own at the end.
+' Tony, 24 Oct: "every time a quote goes out it should be recorded there".
+Public Sub CrownLogQuoteHistory(ByVal carrier As String, ByVal down As String, _
+                                ByVal monthly As String, ByVal term As String)
+    Dim output As Worksheet, history As Worksheet
+    Dim columns As Long, row As Long, extra As Long
+
+    On Error Resume Next
+    Set output = ThisWorkbook.Sheets("Output")
+    Set history = ThisWorkbook.Sheets("Output History")
+
+    If output Is Nothing Then Exit Sub
+
+    If history Is Nothing Then
+        Set history = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
+        history.Name = "Output History"
+    End If
+
+    columns = output.Cells(1, output.Columns.Count).End(xlToLeft).Column
+    If columns < 1 Then Exit Sub
+
+    row = history.Cells(history.Rows.Count, 1).End(xlUp).row + 1
+
+    If row = 2 And Len(CStr(history.Cells(1, 1).value)) = 0 Then
+        history.Range(history.Cells(1, 1), history.Cells(1, columns)).value = _
+            output.Range(output.Cells(1, 1), output.Cells(1, columns)).value
+    End If
+
+    history.Range(history.Cells(row, 1), history.Cells(row, columns)).value = _
+        output.Range(output.Cells(2, 1), output.Cells(2, columns)).value
+
+    ' The quote itself, after the customer's columns.
+    extra = Application.WorksheetFunction.Max(columns, history.Cells(1, history.Columns.Count).End(xlToLeft).Column) + 1
+    If CStr(history.Cells(1, extra - 1).value) = "Quote term" Then extra = extra - 5
+
+    history.Cells(1, extra).value = "Quote sent"
+    history.Cells(1, extra + 1).value = "Quote carrier"
+    history.Cells(1, extra + 2).value = "Quote down"
+    history.Cells(1, extra + 3).value = "Quote monthly"
+    history.Cells(1, extra + 4).value = "Quote term"
+
+    history.Cells(row, extra).value = Now
+    history.Cells(row, extra + 1).value = carrier
+    history.Cells(row, extra + 2).value = down
+    history.Cells(row, extra + 3).value = monthly
+    history.Cells(row, extra + 4).value = term
+    On Error GoTo 0
 End Sub

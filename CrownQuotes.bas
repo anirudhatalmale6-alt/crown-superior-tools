@@ -424,6 +424,10 @@ Public Sub CrownImportQuoteFile()
     ' The website's own export can go straight through - it is already in
     ' the shape the tool reads.
     If CrownLooksLikeExport(CStr(picked)) Then
+        ' A request already on Crown Quote List is REPLACED by the copy in the
+        ' file (a corrected one from Customer Quotes > Download CSV), rather
+        ' than skipped as "already on it".
+        CrownDropListRowsInFile CStr(picked)
         CrownHandToTool CStr(picked)
         MsgBox "Brought in." & vbCrLf & CrownKeepThem() & vbCrLf & _
                "Edit Data is showing the row you had open.", _
@@ -1160,6 +1164,9 @@ Public Sub CrownSendQuote()
         Exit Sub
     End If
 
+    ' Every quote that goes out is written on Output History (24 Oct).
+    CrownLogQuoteHistory carrier, down, monthly, term
+
     MsgBox "Sent." & vbCrLf & vbCrLf & _
            who & " can see this on their own quote page now." & _
            IIf(InStr(1, answer, "written to the sheet", vbTextCompare) > 0, _
@@ -1327,6 +1334,95 @@ Private Sub CrownPlaceRow(ByVal list As Worksheet, ByVal output As Worksheet, _
 
     RetrieveDataByRowNumber
 End Sub
+
+
+' Take off Crown Quote List every request whose number starts a line of
+' this website export (first column "SubmissionId").
+Private Sub CrownDropListRowsInFile(ByVal path As String)
+    Dim fileNumber As Integer, line As String, num As String
+    Dim ids As Object, list As Worksheet
+    Dim columns As Long, lastRow As Long, idColumn As Long, r As Long
+
+    Set ids = CreateObject("Scripting.Dictionary")
+
+    On Error GoTo Done
+    fileNumber = FreeFile
+    Open path For Input As #fileNumber
+    Do While Not EOF(fileNumber)
+        Line Input #fileNumber, line
+        num = Replace(Split(line & ",", ",")(0), """", "")
+        If Len(num) >= 4 And IsNumeric(num) And InStr(num, ".") = 0 Then ids(CLng(num)) = True
+    Loop
+    Close #fileNumber
+
+    If ids.Count = 0 Then Exit Sub
+
+    Set list = ThisWorkbook.Sheets("Crown Quote List")
+    columns = list.Cells(1, list.Columns.Count).End(xlToLeft).Column
+    lastRow = CrownLastUsedRow(list, columns)
+    idColumn = CrownColumnNamed(list, columns, QUOTE_ID_HEADING)
+
+    If idColumn < 1 Then Exit Sub
+
+    For r = lastRow To 2 Step -1
+        If ids.Exists(CLng(Val(list.Cells(r, idColumn).value))) Then list.Rows(r).Delete
+    Next r
+    Exit Sub
+
+Done:
+    On Error Resume Next
+    Close #fileNumber
+End Sub
+
+
+' Read one request again from the website and put the fresh copy on
+' Crown Quote List in place of the old one - so a request corrected on the
+' website (Edit request on Customer Quotes) is quoted with the corrected
+' details, not the ones brought in the first time (Tony, 24 Oct).
+'
+' The old row is only taken off once a good copy has come back; if the
+' website does not answer, the row that was there is used as before.
+'
+' @return "" when nothing changed, otherwise what happened
+Public Function CrownRefreshQuoteById(ByVal submissionId As Long) As String
+    Dim csv As String, path As String
+    Dim lines() As String
+    Dim list As Worksheet
+    Dim columns As Long, lastRow As Long, idColumn As Long, r As Long
+
+    If submissionId < 1 Then Exit Function
+
+    csv = CrownPost(CrownBody("quotecsv") & "&id=" & submissionId)
+
+    If Len(csv) = 0 Or Left$(csv, 5) = "error" Then Exit Function
+
+    lines = Split(Replace(csv, vbCrLf, vbLf), vbLf)
+
+    If UBound(lines) < 1 Then Exit Function
+    If InStr(1, lines(0), "SubmissionId", vbTextCompare) = 0 Then Exit Function
+    If InStr(1, csv, CStr(submissionId), vbBinaryCompare) = 0 Then Exit Function
+
+    On Error Resume Next
+    Set list = ThisWorkbook.Sheets("Crown Quote List")
+    On Error GoTo 0
+
+    If Not list Is Nothing Then
+        columns = list.Cells(1, list.Columns.Count).End(xlToLeft).Column
+        lastRow = CrownLastUsedRow(list, columns)
+        idColumn = CrownColumnNamed(list, columns, QUOTE_ID_HEADING)
+
+        If idColumn > 0 Then
+            For r = lastRow To 2 Step -1
+                If Val(list.Cells(r, idColumn).value) = submissionId Then list.Rows(r).Delete
+            Next r
+        End If
+    End If
+
+    path = CrownWriteTemp(csv, "crown-quote-" & submissionId & "-")
+    CrownHandToTool path
+
+    CrownRefreshQuoteById = "read again from the website: " & CrownKeepThem()
+End Function
 
 
 ' The same, chosen by the website's request number rather than by where
