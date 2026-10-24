@@ -36,6 +36,7 @@ Public CrownUnitedDirectMonthly As String
 
 Private Const LS_WAIT_SECONDS As Long = 45
 Private Const PREMIUM_WAIT_SECONDS As Long = 30
+Private Const APPLY_WAIT_SECONDS As Long = 45
 
 
 ' ---------------------------------------------------------------------
@@ -321,6 +322,41 @@ Private Function CrownUnitedSettle(ByVal drv As Object) As Boolean
 
     CrownNotePage drv, "United: the payment page did not come back"
     CrownLastAlert = "United: the payment page did not come back"
+End Function
+
+
+' After Apply on the payment page: wait for the employer page (txtEmpName1).
+'
+' His LoopElementUntilFound gives it 10 seconds and then quits the whole
+' quote without a word, so the RunLog showed the last pop-up instead -
+' "Agency fees can not be included in credit card payments" - which had
+' already been waved through (QuoteLook, 22 and 23 Oct). This waits
+' longer, answers pop-ups on the way, and when the page still does not
+' come, puts what IS on screen on QuoteLook and says so.
+Public Function CrownUnitedAfterApply(ByVal drv As Object) As Boolean
+    Dim started As Date
+    Dim answer As String
+
+    started = Now
+
+    Do
+        If Not CrownHandleAlert(drv) Then Exit Function
+
+        answer = CrownUnitedJs(drv, _
+            "var e=document.getElementById('txtEmpName1');" & _
+            "return (document.readyState==='complete'&&e&&e.offsetParent!==null)?'ready':'wait';")
+
+        If answer = "ready" Then
+            CrownUnitedAfterApply = True
+            Exit Function
+        End If
+
+        drv.Wait 700
+        DoEvents
+    Loop While (Now - started) * 86400 < APPLY_WAIT_SECONDS
+
+    CrownNotePage drv, "United: after Apply on the payment page the employer page did not come up"
+    CrownLastAlert = "United: after Apply on the payment page the employer page did not come up"
 End Function
 
 
