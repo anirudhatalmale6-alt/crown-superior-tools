@@ -30,6 +30,10 @@ Public CrownUnitedDown As String
 Public CrownUnitedPrevBalance As String
 Public CrownUnitedPayToday As String
 
+' The direct bill (no auto pay) quote, read after the auto pay one (24 Oct).
+Public CrownUnitedDirectDown As String
+Public CrownUnitedDirectMonthly As String
+
 Private Const LS_WAIT_SECONDS As Long = 45
 Private Const PREMIUM_WAIT_SECONDS As Long = 30
 
@@ -136,6 +140,8 @@ Public Function CrownUnitedPremium(ByVal drv As Object) As Boolean
     CrownUnitedDown = ""
     CrownUnitedPrevBalance = ""
     CrownUnitedPayToday = ""
+    CrownUnitedDirectDown = ""
+    CrownUnitedDirectMonthly = ""
 
     If Not CrownUnitedSettle(drv) Then Exit Function
 
@@ -620,3 +626,65 @@ Private Function CrownOutputColumn(ByVal heading As String) As Long
         End If
     Next c
 End Function
+
+
+' ---------------------------------------------------------------------
+' The direct bill quote (Tony, 24 Oct): "on united you have to uncheck the
+' box for autopayments credit/debit then scrape quote from the same box".
+' Run after the auto pay figures have been read. Unticks "Select for
+' Automatic Credit/Debit card or Bank Transfer(EFT)", lets United redraw,
+' makes sure 16.67% DOWN PAY is still the plan, and reads its down payment
+' and first installment into CrownUnitedDirectDown / CrownUnitedDirectMonthly.
+' Leaves them empty, with a QuoteLook note, when it cannot.
+' ---------------------------------------------------------------------
+Public Sub CrownUnitedDirectBill(ByVal drv As Object)
+    Dim answer As String, figures As String
+    Dim tries As Long
+
+    CrownUnitedDirectDown = ""
+    CrownUnitedDirectMonthly = ""
+
+    answer = CrownUnitedJs(drv, _
+        "var box=null,tds=document.querySelectorAll('td,span,label');" & _
+        "for(var i=0;i<tds.length&&!box;i++){var t=tds[i].innerText||'';" & _
+        "if(!/automatic\s+credit\/debit\s+card\s+or\s+bank\s+transfer/i.test(t))continue;" & _
+        "var tr=tds[i].closest('tr');var c=tr&&tr.querySelector('input[type=checkbox]');if(c)box=c;}" & _
+        "if(!box)return 'no auto pay box';if(!box.checked)return 'already off';" & _
+        "setTimeout(function(){box.click();},50);return 'unticked';")
+
+    CrownNoteBlocker "United direct bill: auto pay box " & answer
+
+    If answer = "no auto pay box" Then Exit Sub
+
+    drv.Wait 2500
+    If Not CrownUnitedSettle(drv) Then Exit Sub
+
+    ' The plan can come back unselected after the redraw.
+    For tries = 1 To 3
+        answer = CrownUnitedJs(drv, CrownPlanJs())
+        If answer = "already" Then Exit For
+
+        drv.Wait 2500
+        If Not CrownUnitedSettle(drv) Then Exit Sub
+    Next tries
+
+    figures = CrownUnitedJs(drv, _
+        "var pr=document.getElementById('rowPlan');if(!pr)return 'no plan table';" & _
+        "var col=-1;for(var i=0;i<pr.cells.length;i++){if(/16\.67\s*%/.test(pr.cells[i].innerText||'')){col=i;break;}}" & _
+        "if(col<0)return 'no 16.67 column';" & _
+        "function cell(id){var r=document.getElementById(id);return r&&r.cells[col]?(r.cells[col].innerText||''):'';}" & _
+        "function num(t){var m=String(t).replace(/,/g,'').match(/\$\s*([0-9]+(?:\.[0-9]+)?)/);return m?m[1]:'';}" & _
+        "var down=num(cell('rowDown'));var inst=cell('rowInstAmt');" & _
+        "var m=inst.replace(/,/g,'').match(/installment\s*1\s*:\s*\$\s*([0-9]+(?:\.[0-9]+)?)/i);" & _
+        "var mon=m?m[1]:num(inst);return down+'|'+mon;")
+
+    If InStr(1, figures, "|") = 0 Or Left$(figures, 1) = "|" Then
+        CrownNotePage drv, "United direct bill: could not read the 16.67% figures (" & figures & ")"
+        Exit Sub
+    End If
+
+    CrownUnitedDirectDown = Split(figures, "|")(0)
+    CrownUnitedDirectMonthly = Split(figures, "|")(1)
+
+    CrownNoteBlocker "United direct bill: down " & CrownUnitedDirectDown & ", installment " & CrownUnitedDirectMonthly
+End Sub

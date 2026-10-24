@@ -30,6 +30,13 @@ Option Explicit
 ' sits on moves from one customer to the next.
 Private Const VERVE_PLAN As String = "5 Pay 16.67% Down CC 30 Day Due"
 
+' The direct bill row - no CC, no EFT (Tony, 24 Oct: "the one that doesnt
+' say cc or eft"). Read from the same table, after the CC one.
+Private Const VERVE_DIRECT_PLAN As String = "5 Pay 16.67% Down"
+
+Public CrownVerveDirectDown As String
+Public CrownVerveDirectMonthly As String
+
 ' Words that only appear on the pages they belong to.
 Private Const ON_COVERAGES As String = "Vehicle Level Coverages"
 Private Const ON_QUESTIONS As String = "Are all residents of the household"
@@ -219,7 +226,30 @@ Private Function CrownVerveReadPlan(ByVal drv As ChromeDriver, ByRef down As Str
     Dim i As Long, c As Long, at As Long
     Dim messages As String
 
+    CrownVerveDirectDown = ""
+    CrownVerveDirectMonthly = ""
+
     rows = CrownVervePlanRows(drv)
+
+    ' The direct bill row first, quietly - it never decides the result.
+    lines = Split(rows, vbLf)
+
+    For i = LBound(lines) To UBound(lines)
+        cells = Split(lines(i), vbTab)
+
+        For c = LBound(cells) To UBound(cells)
+            If StrComp(CrownVerveFlat(cells(c)), CrownVerveFlat(VERVE_DIRECT_PLAN), vbTextCompare) = 0 Then
+                If UBound(cells) >= c + 5 Then
+                    CrownVerveDirectDown = CrownPlainMoney(cells(c + 1))
+                    CrownVerveDirectMonthly = CrownPlainMoney(cells(c + 5))
+                End If
+
+                Exit For
+            End If
+        Next c
+
+        If Len(CrownVerveDirectDown) > 0 Then Exit For
+    Next i
 
     If Len(rows) = 0 Then
         CrownNotePage drv, "Verve: no pay plan table after the MVR"
