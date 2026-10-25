@@ -701,9 +701,13 @@ Public Sub CrownUnitedDirectBill(ByVal drv As Object)
         "if(!box)return 'no auto pay box';if(!box.checked)return 'already off';" & _
         "setTimeout(function(){box.click();},50);return 'unticked';")
 
-    CrownNoteBlocker "United direct bill: auto pay box " & answer
+    If answer = "no auto pay box" Then
+        ' Page and all, so the box (or the page it is on) can be found.
+        CrownNotePage drv, "United direct bill: no auto pay box on this page"
+        Exit Sub
+    End If
 
-    If answer = "no auto pay box" Then Exit Sub
+    CrownNoteBlocker "United direct bill: auto pay box " & answer
 
     drv.Wait 2500
     If Not CrownUnitedSettle(drv) Then Exit Sub
