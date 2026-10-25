@@ -1328,11 +1328,42 @@ Private Sub CrownPlaceRow(ByVal list As Worksheet, ByVal output As Worksheet, _
     output.Cells(2, 1).PasteSpecial xlPasteValues
     Application.CutCopyMode = False
 
+    CrownFixLicenses output, columns
+
     edit.Range("C5").value = 2
 
     Application.ScreenUpdating = True
 
     RetrieveDataByRowNumber
+End Sub
+
+
+' Georgia license numbers are 9 digits, and many start with 0 - which
+' Excel drops the moment the number lands in a cell, so United and Verve
+' got 8 digits ("License number should be 9 numeric digits"). On the
+' quote now on Output (row 2), a Georgia (or no-state) license of exactly
+' 8 digits gets its 0 back, stored as text so it stays. Anything else is
+' left as it is (Tony, 25 Oct).
+Private Sub CrownFixLicenses(ByVal output As Worksheet, ByVal columns As Long)
+    Dim n As Long, colL As Long, colS As Long
+    Dim have As String, state As String
+
+    For n = 1 To 4
+        colL = CrownColumnNamed(output, columns, IIf(n = 1, "Drivers License Number", "Driver " & n & " Driver's License Number"))
+        colS = CrownColumnNamed(output, columns, "License State " & n)
+
+        If colL > 0 Then
+            have = Trim$(CStr(output.Cells(2, colL).value))
+            state = ""
+            If colS > 0 Then state = UCase$(Trim$(CStr(output.Cells(2, colS).value)))
+
+            If (state = "" Or state = "GA") And Len(have) = 8 And have Like "########" Then
+                output.Cells(2, colL).NumberFormat = "@"
+                output.Cells(2, colL).value = "0" & have
+                CrownNoteBlocker "license for driver " & n & ": the leading 0 Excel dropped was put back"
+            End If
+        End If
+    Next n
 End Sub
 
 

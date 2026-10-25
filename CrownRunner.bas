@@ -183,6 +183,7 @@ Public Sub CrownRunQuotes()
         priced = False
         vNote = ""
         CrownLastStopReason = ""
+        CrownLastStopState = ""
         CrownLastAlert = ""
 
         ' The request as it is on the website NOW - corrections made there
@@ -203,6 +204,7 @@ Public Sub CrownRunQuotes()
 
             ' One customer's "not today" must never be read as the next one's.
             CrownLastStopReason = ""
+            CrownLastStopState = ""
             CrownLastAlert = ""
 
             ' His own quoting, exactly as he runs it by hand.
@@ -227,7 +229,7 @@ Public Sub CrownRunQuotes()
 
                 told = CrownQuoteResult(CLng(ids(i)), _
                     Array("carrier", "state", "note", "who"), _
-                    Array(carrier, "working", CrownLastStopReason, "the quoting tool"))
+                    Array(carrier, IIf(CrownLastStopState = "declined", "declined", "working"), CrownLastStopReason, "the quoting tool"))
 
                 If InStr(1, told, """ok"":true", vbTextCompare) > 0 Then
                     note = "United would not quote - sent to the website: " & CrownLastStopReason

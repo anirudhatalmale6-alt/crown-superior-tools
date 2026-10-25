@@ -55,6 +55,11 @@ Option Explicit
 ' quote, so one customer's weather notice never lands on the next.
 Public CrownLastStopReason As String
 
+' "declined" when that refusal was United turning the customer down (risk
+' unacceptable): the website keeps it from the customer altogether and
+' shows it to staff only (Tony, 25 Oct). Empty = "working" (weather etc).
+Public CrownLastStopState As String
+
 ' The last alert of any kind, for the RunLog.
 Public CrownLastAlert As String
 

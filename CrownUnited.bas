@@ -68,7 +68,9 @@ Public Function CrownUnitedLightspeed(ByVal drv As Object) As Boolean
         If InStr(1, answer, "RISK UNACCEPTABLE", vbTextCompare) > 0 Then
             CrownNotePage drv, "STOPPED, United will not quote: RISK UNACCEPTABLE"
             CrownLastAlert = "United: risk unacceptable (rejected by United)"
-            CrownLastStopReason = "United could not offer a quote for this driver."
+            CrownLastStopReason = "United rejected: RISK UNACCEPTABLE - " & CrownUnitedJs(drv, _
+                "var t=document.body?document.body.innerText:'';var m=t.match(/Rejected[^\n]*/i);return m?m[0].substring(0,120):'';")
+            CrownLastStopState = "declined"
 
             Exit Function
         End If
