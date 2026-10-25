@@ -281,8 +281,9 @@ Public Function CrownHandleAlert(ByVal drv As Object) As Boolean
     End If
 
     ' Not one we know. Written down before asking, so that even if you
-    ' press No the wording is kept and can be added to the list.
-    CrownNoteBlocker "STOPPED, alert not recognised: " & Left$(text, 200)
+    ' press No the wording is kept and can be added to the list - with the
+    ' page it came from, so the box it is about can be found (25 Oct).
+    CrownNotePage drv, "STOPPED, alert not recognised: " & Left$(text, 200)
 
     ' Nobody is sitting there during a batch. Asking would put a box on
     ' screen that waits five minutes, times out, and abandons the quote
@@ -365,7 +366,12 @@ Public Function CrownLookAtPage(ByVal drv As Object) As String
     answer = drv.ExecuteScript( _
         "function clean(s){return ((s||'')+'').replace(/\s+/g,' ')" & _
         ".replace(/^ | $/g,'');}" & _
-        "var out=[],seen={},all=document.querySelectorAll(" & _
+        "var out=[],seen={},errs=[],bad=document.querySelectorAll(" & _
+        "'[class*=rror],[id*=rror],[class*=alid],[id*=alid],.dxeErrorCell,[role=alert],font[color=red],span[style*=red]');" & _
+        "for(var b=0;b<bad.length&&errs.length<15;b++){var x=clean(bad[b].innerText||'');" & _
+        "if(x&&bad[b].getClientRects().length&&x.length<200&&errs.indexOf(x)<0)errs.push(x);}" & _
+        "if(errs.length)out.push('ERRORS ON PAGE: '+errs.join(' | '));" & _
+        "var all=document.querySelectorAll(" & _
         "'input,select,button,a,label,h1,h2,h3,legend,td');" & _
         "for(var i=0;i<all.length;i++){var el=all[i];" & _
         "if(!el.getClientRects().length)continue;" & _
@@ -378,7 +384,7 @@ Public Function CrownLookAtPage(ByVal drv As Object) As String
         "if(!who&&!t)continue;if(t.length>90)t=t.substring(0,90);" & _
         "var line=what+(who?' #'+who:'')+(t?'  = '+t:'');" & _
         "if(seen[line])continue;seen[line]=1;out.push(line);" & _
-        "if(out.length>60)break;}" & _
+        "if(out.length>140)break;}" & _
         "return 'TITLE: '+clean(document.title)+String.fromCharCode(10)+out.join(String.fromCharCode(10));")
     On Error GoTo 0
 

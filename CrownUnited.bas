@@ -60,6 +60,19 @@ Public Function CrownUnitedLightspeed(ByVal drv As Object) As Boolean
     Do
         If Not CrownHandleAlert(drv) Then Exit Function
 
+        ' "RISK UNACCEPTABLE - Rejected as per past UAIC experience" (Marcus
+        ' Shaw, 24 Oct): United's own no. Sent to the website as its note,
+        ' not tried again; the page with the reason goes on QuoteLook.
+        answer = CrownUnitedJs(drv, "return document.title||'';")
+
+        If InStr(1, answer, "RISK UNACCEPTABLE", vbTextCompare) > 0 Then
+            CrownNotePage drv, "STOPPED, United will not quote: RISK UNACCEPTABLE"
+            CrownLastAlert = "United: risk unacceptable (rejected by United)"
+            CrownLastStopReason = "United could not offer a quote for this driver."
+
+            Exit Function
+        End If
+
         answer = CrownUnitedJs(drv, CrownLightspeedJs())
 
         If answer = "premium" Then
