@@ -591,6 +591,20 @@ Private Function CrownRunVerve(ByVal ws As Worksheet, ByVal row As Long, _
         Else
             note = note & " - the website refused it: " & Left$(answer, 90)
         End If
+    ElseIf CrownIsRejection(note) Then
+        ' Verve said no ("Full coverage not accepted on the vehicle", ...).
+        ' That IS the answer: on the website as declined - staff see it,
+        ' the customer does not - and Verve is not tried again for them.
+        answer = CrownQuoteResult(id, _
+            Array("carrier", "state", "note", "who"), _
+            Array("Verve", "declined", Left$(note, 240), "the quoting tool"))
+
+        If InStr(1, answer, """ok"":true", vbTextCompare) > 0 Then
+            CrownRunVerve = True
+            note = "REJECTED by Verve - on the website as declined, not tried again: " & note
+        Else
+            note = note & " - the website refused the rejection: " & Left$(answer, 90)
+        End If
     End If
 
     ws.Cells(row, 4).value = down

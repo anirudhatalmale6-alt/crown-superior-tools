@@ -616,14 +616,18 @@ Public Sub CrownUnitedOdometer(ByVal drv As Object, ByVal vehNo As Long, ByRef a
     On Error Resume Next
     If col > 0 Then miles = CrownDigits(CStr(arData(i, col)))
 
+    ' Only a VISIBLE "Odometer Reading" label counts, and only a text box
+    ' straight after it in the same table - a hidden vehicle 2-4 section
+    ' once pointed this at some other box further down (26 Oct).
     Set el = drv.ExecuteScript( _
         "var n=arguments[0],vis=function(e){return !!e.getClientRects().length;};" & _
         "var a=[].slice.call(document.querySelectorAll('input[type=text],input:not([type])')).filter(function(e){return vis(e)&&/odom/i.test(e.id+' '+e.name);});" & _
         "if(a.length>=n)return a[n-1];" & _
         "var w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT),t,k=0;" & _
-        "while((t=w.nextNode())){if(/odometer\s*reading/i.test(t.nodeValue)){k++;if(k===n){" & _
-        "var all=[].slice.call(document.querySelectorAll('input')).filter(vis);" & _
-        "for(var j=0;j<all.length;j++){if(t.compareDocumentPosition(all[j])&4)return all[j];}}}}" & _
+        "while((t=w.nextNode())){var p=t.parentElement;if(!p||!vis(p))continue;if(/odometer\s*reading/i.test(t.nodeValue)){k++;if(k===n){" & _
+        "var scope=p.closest('table')||p.parentElement||document.body;" & _
+        "var all=[].slice.call(scope.querySelectorAll('input[type=text],input:not([type])')).filter(vis);" & _
+        "for(var j=0;j<all.length;j++){if(t.compareDocumentPosition(all[j])&4)return all[j];}return null;}}}" & _
         "return null;", vehNo)
     If Err.Number <> 0 Then Set el = Nothing
     Err.Clear
@@ -645,6 +649,11 @@ Public Sub CrownUnitedOdometer(ByVal drv As Object, ByVal vehNo As Long, ByRef a
 
     If Len(miles) = 0 Then
         On Error GoTo 0
+
+        ' Vehicles 2-4 with no mileage are usually vehicles that are not
+        ' there; if United really wants one it says so, and that is kept.
+        If vehNo > 1 Then Exit Sub
+
         CrownLastAlert = "United needs the odometer reading for vehicle " & vehNo & " and Mileage is blank on the request"
         CrownNoteBlocker CrownLastAlert
         Exit Sub

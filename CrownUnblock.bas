@@ -248,6 +248,25 @@ End Function
 '
 ' The alert is accepted either way - that part was never the problem. The
 ' change is that a known one no longer puts a question in front of you.
+' Is this the company saying no to the customer - vehicle, driver or risk
+' unacceptable, full coverage not accepted, and the like? Tony, 26 Oct:
+' "on quote retry no need to quote that company again. The answer has
+' already been given."
+Public Function CrownIsRejection(ByVal text As String) As Boolean
+    Dim t As String, w As Variant
+
+    t = LCase$(text)
+
+    For Each w In Array("unacceptable", "not accepted", "liability only policies accepted", _
+                        "ineligible", "not eligible", "declined", "rejected")
+        If InStr(1, t, CStr(w), vbBinaryCompare) > 0 Then
+            CrownIsRejection = True
+            Exit Function
+        End If
+    Next w
+End Function
+
+
 Public Function CrownHandleAlert(ByVal drv As Object) As Boolean
     Dim text As String
     Dim answer As VbMsgBoxResult
@@ -269,6 +288,17 @@ Public Function CrownHandleAlert(ByVal drv As Object) As Boolean
     On Error GoTo 0
 
     CrownLastAlert = Trim$(text)
+
+    ' The company turning the customer down: an answer, not a failure.
+    ' Recorded as declined (staff only) and not tried again (26 Oct).
+    If CrownIsRejection(text) Then
+        CrownLastStopReason = "United: " & Trim$(text)
+        CrownLastStopState = "declined"
+        CrownNoteBlocker "STOPPED, United rejected it: " & Left$(text, 200)
+        CrownHandleAlert = False
+
+        Exit Function
+    End If
 
     If CrownAlertIsStop(text) Then
         CrownLastStopReason = Trim$(text)   ' United's own words, no carrier name - the customer sees this note
