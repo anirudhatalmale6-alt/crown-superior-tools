@@ -636,7 +636,9 @@ Public Sub CrownUnitedOdometer(ByVal drv As Object, ByVal vehNo As Long, ByRef a
     have = CrownDigits(CStr(el.Value))
     Err.Clear
 
-    If Len(have) > 0 Then
+    ' United puts 0 in the box itself (Jasmine Hodges, 25 Oct), so 0 is
+    ' still an empty box - only a real reading is left alone.
+    If Val(have) > 0 Then
         On Error GoTo 0
         Exit Sub
     End If
