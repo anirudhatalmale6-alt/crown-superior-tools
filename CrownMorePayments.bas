@@ -2172,3 +2172,65 @@ Private Sub CrownLookSave(ByVal path As String, ByVal text As String)
         .Close
     End With
 End Sub
+
+
+' ---------------------------------------------------------------------
+' Assurance America's drop-down lists (Angular Material), for his
+' ScrapeAssuranceAmerica (Tony, 26 Oct: the policy status report stopped
+' with the status list open).
+'
+' His macro clicked the options by their page ids - mat-option-0, -1, -3
+' ... - and closed the list by clicking /html/body/div[4]/div[1]. Both are
+' numbers the site hands out as it builds the page, so they moved and the
+' run stopped. These go by what is actually open on screen instead.
+' ---------------------------------------------------------------------
+
+' Tick exactly the options at these places in the open list (1 = first),
+' untick the rest. Ticks are checked, not toggled, so a list that opens
+' with some already ticked still ends up right. Says what it picked.
+Public Function CrownMatTickPositions(ByVal drv As Object, ByVal positions As String) As String
+    Dim answer As String
+
+    On Error Resume Next
+    answer = CStr(drv.ExecuteScript( _
+        "var want=(','+arguments[0]+',');" & _
+        "var opts=[].slice.call(document.querySelectorAll('.cdk-overlay-pane mat-option'));" & _
+        "var picked=[];" & _
+        "opts.forEach(function(o,i){var on=o.classList.contains('mat-selected')||o.classList.contains('mdc-list-item--selected')||o.getAttribute('aria-selected')==='true';" & _
+        "var should=want.indexOf(','+(i+1)+',')>=0;if(on!==should)o.click();if(should)picked.push((o.innerText||'').replace(/\s+/g,' ').trim());});" & _
+        "return opts.length+' options; ticked: '+picked.join(', ');", positions))
+    If Err.Number <> 0 Then answer = "could not read the list: " & Err.Description
+    Err.Clear
+    On Error GoTo 0
+
+    CrownNoteBlocker "Assurance America status list - " & answer
+    CrownMatTickPositions = answer
+End Function
+
+' Click the option at this place in the open single-choice list.
+Public Function CrownMatPickPosition(ByVal drv As Object, ByVal position As Long) As String
+    Dim answer As String
+
+    On Error Resume Next
+    answer = CStr(drv.ExecuteScript( _
+        "var opts=[].slice.call(document.querySelectorAll('.cdk-overlay-pane mat-option'));" & _
+        "var o=opts[arguments[0]-1];if(!o)return 'no option '+arguments[0]+' (list has '+opts.length+')';" & _
+        "o.click();return (o.innerText||'').replace(/\s+/g,' ').trim();", position))
+    If Err.Number <> 0 Then answer = "could not read the list: " & Err.Description
+    Err.Clear
+    On Error GoTo 0
+
+    CrownNoteBlocker "Assurance America list - picked: " & answer
+    CrownMatPickPosition = answer
+End Function
+
+' Close whatever list is open, the way a click beside it would.
+Public Sub CrownMatCloseList(ByVal drv As Object)
+    On Error Resume Next
+    drv.ExecuteScript _
+        "var b=document.querySelector('.cdk-overlay-backdrop');" & _
+        "if(b){b.click();}else{document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',keyCode:27,bubbles:true}));}"
+    Err.Clear
+    On Error GoTo 0
+    drv.Wait 600
+End Sub
