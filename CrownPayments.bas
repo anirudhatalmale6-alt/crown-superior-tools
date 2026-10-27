@@ -2588,6 +2588,16 @@ Public Sub CrownVervePaymentDue()
                 End If
             End If
 
+            ' 27 Oct (Tony, Antwene Wilson): a balance below zero is the
+            ' account in credit, not a payment due. When the Future tab gave
+            ' no instalment to put in its place it went to the website as
+            ' -12.00. It is never sent as a number: N/A until a real one comes.
+            If Left$(Trim$(dueAmount), 1) = "-" Then
+                note = Trim$(note & " Verve shows a credit of " & dueAmount & " and no instalment to come - sent as N/A")
+                dueAmount = "N/A"
+                dueDate = ""
+            End If
+
             ' What the report says beats what the billing line implies.
             reported = ""
 

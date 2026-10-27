@@ -570,6 +570,58 @@ Public Sub CrownUnitedPriorCompany(ByVal drv As Object, ByVal company As String)
 End Sub
 
 
+' ---------------------------------------------------------------------
+' The Issue Policy (application) page, 27 Oct (Tony, Jecoliah Spencer):
+'
+' 1. "Previous Company Name" is a typing box here, not United's list, and
+'    United stops with "Please enter previous company name" when it is
+'    empty. The customer's answer goes in; no answer = "Other" (his rule).
+' 2. "Invalid Garage Address ... a. Check box to accept address1" stops
+'    the page until that box is ticked. It is ticked and Continue pressed
+'    again - once; a second time means something else is wrong.
+' ---------------------------------------------------------------------
+Public Sub CrownUnitedAppPrevCompany(ByVal drv As Object, ByVal company As String)
+    Dim answer As String
+
+    company = Trim$(company)
+    If Len(company) = 0 Then company = "Other"
+
+    answer = CrownUnitedJs(drv, _
+        "var all=document.querySelectorAll('td,span,label,div,font,b');var lab=null;" & _
+        "for(var i=0;i<all.length;i++){var t=(all[i].innerText||'').replace(/\s+/g,' ').trim();" & _
+        "if(/^previous company name$/i.test(t)){lab=all[i];break;}}" & _
+        "if(!lab)return 'no Previous Company Name box';" & _
+        "var ins=document.querySelectorAll('input[type=text],input:not([type])'),box=null;" & _
+        "for(var j=0;j<ins.length;j++){if(lab.compareDocumentPosition(ins[j])&4){box=ins[j];break;}}" & _
+        "if(!box)return 'no box after the label';" & _
+        "if((box.value||'').trim()!=='')return 'already has '+box.value;" & _
+        "box.value=arguments[0];box.dispatchEvent(new Event('change',{bubbles:true}));" & _
+        "return 'typed '+arguments[0];", company)
+
+    CrownNoteBlocker "United application, previous company: " & answer
+End Sub
+
+Public Function CrownUnitedAcceptAddress(ByVal drv As Object) As Boolean
+    Dim answer As String
+
+    answer = CrownUnitedJs(drv, _
+        "var t=(document.body&&document.body.innerText)||'';" & _
+        "if(!/check box to accept address/i.test(t))return 'none';" & _
+        "var all=document.querySelectorAll('td,span,label,div,font,li,p');var lab=null;" & _
+        "for(var i=0;i<all.length;i++){var s=(all[i].innerText||'').replace(/\s+/g,' ').trim();" & _
+        "if(/check box to accept address/i.test(s)&&s.length<80){lab=all[i];break;}}" & _
+        "var box=lab?lab.querySelector('input[type=checkbox]'):null;" & _
+        "if(!box&&lab){var cs=document.querySelectorAll('input[type=checkbox]');" & _
+        "for(var j=cs.length-1;j>=0;j--){if(cs[j].compareDocumentPosition(lab)&4){box=cs[j];break;}}}" & _
+        "if(!box)return 'no tick box';" & _
+        "if(box.checked)return 'already ticked';" & _
+        "box.click();return 'ticked';")
+
+    CrownNoteBlocker "United application, address check: " & answer
+    CrownUnitedAcceptAddress = (answer = "ticked")
+End Function
+
+
 ' Run a script and hand back its answer as text; an open alert or a page
 ' mid-load comes back as "wait" rather than as an error.
 Private Function CrownUnitedJs(ByVal drv As Object, ByVal script As String, _
