@@ -891,6 +891,125 @@ Private Function CrownUaigDetail(ByVal drv As ChromeDriver) As String
     CrownUaigDetail = answer
 End Function
 
+' ---------------------------------------------------------------------
+' Renewals United filed under a NEW number (Tony, 26 Oct). Jasmine
+' Hodges: GAI 204580 expired, the renewal is GAI-10204580 - the old
+' number with 10 in front - and searching the old number never shows it.
+' Its page names the old one as "Previous Policy Number", so that is the
+' proof it is this customer's renewal and not somebody else's policy.
+' ---------------------------------------------------------------------
+
+' The money on a United policy page, as four parts separated by | :
+'   first payment | instalment | payment day | total premium
+' First payment = the payment already posted (E-CHECK -238.00 -> 238.00).
+' Instalment and day come from the first instalment line, once United has
+' one ("n/a until it is there"). Anything not shown comes back empty.
+Private Function CrownUaigBilling(ByVal drv As ChromeDriver) As String
+    Dim answer As String
+
+    On Error Resume Next
+    answer = CStr(drv.ExecuteScript( _
+        "function t(s){return (s||'').replace(/\s+/g,' ').trim();}" & _
+        "function money(s){var m=t(s).replace(/,/g,'').match(/-?\s*\$?\s*-?\s*(\d+(?:\.\d{1,2})?)/);return m?m[1]:'';}" & _
+        "var body=t(document.body.innerText);" & _
+        "var tot=(body.match(/Total Premium\s*\$?\s*([\d,]+\.\d{2})/i)||[])[1]||'';" & _
+        "var first='',inst='',day='';" & _
+        "var tables=document.querySelectorAll('table');" & _
+        "for(var k=0;k<tables.length;k++){var rows=tables[k].rows;if(!rows||rows.length<2)continue;" & _
+        "var head=-1,ia=-1,idue=-1;" & _
+        "for(var r=0;r<rows.length&&head<0;r++){var c=rows[r].cells;for(var j=0;j<c.length;j++){var x=t(c[j].innerText).toLowerCase();" & _
+        "if(x==='amount')ia=j;if(x==='due')idue=j;}if(ia>=0&&idue>=0)head=r;else{ia=-1;idue=-1;}}" & _
+        "if(head<0)continue;" & _
+        "for(var r2=head+1;r2<rows.length;r2++){var c2=rows[r2].cells;if(c2.length<=ia)continue;" & _
+        "var name=t(c2[0].innerText),amt=t(c2[ia].innerText);" & _
+        "if(!first&&/-/.test(amt)&&!/business|installment|fee/i.test(name))first=money(amt);" & _
+        "if(!inst&&/install/i.test(name)){inst=money(amt);var d=t(c2[idue].innerText).match(/^(\d{1,2})[-\/](\d{1,2})/);if(d)day=String(+d[2]);}}" & _
+        "if(first||inst)break;}" & _
+        "return [first,inst,day,tot.replace(/,/g,'')].join('|');"))
+    If Err.Number <> 0 Then answer = ""
+    Err.Clear
+    On Error GoTo 0
+
+    CrownUaigBilling = answer
+End Function
+
+' "Your payments are due on the 15th of each month" - the wording of the
+' policy form's Payment day list (the website matches the spacing).
+Private Function CrownPayDayText(ByVal dayNumber As String) As String
+    Dim n As Long, suffix As String
+
+    n = Val(dayNumber)
+    If n < 1 Or n > 31 Then Exit Function
+
+    Select Case n
+    Case 1, 21, 31: suffix = "st"
+    Case 2, 22: suffix = "nd"
+    Case 3, 23: suffix = "rd"
+    Case Else: suffix = "th"
+    End Select
+
+    CrownPayDayText = "Your payments are due on the " & n & suffix & " of each month"
+End Function
+
+' An expired policy: is there a renewal under "10" & its number? Added to
+' renewals (to be offered at the end of the run) only when the page names
+' this policy as its Previous Policy Number. Says what it found either way.
+Private Sub CrownUaigFindRenewal(ByVal drv As ChromeDriver, ByVal ws As Object, ByVal row As Long, _
+                                 ByVal recordId As String, ByVal siteNumber As String, _
+                                 ByVal policyDigits As String, ByVal index As Object, _
+                                 ByVal names As Object, ByVal renewals As Collection)
+    Dim By As New Selenium.By
+    Dim candidate As String, url As String, detail As String, billing As String
+    Dim dueAmt As String, said As String
+
+    If Len(policyDigits) <> 6 Then Exit Sub    ' the only pattern United has shown so far
+
+    candidate = "10" & policyDigits
+
+    If index.Exists(candidate) Then
+        ws.Cells(row, 11).value = ws.Cells(row, 11).value & " Renewal " & candidate & _
+                                  " is already on the site as record " & index(candidate) & "."
+        Exit Sub
+    End If
+
+    On Error Resume Next
+    url = CrownUaigPolicyUrl(drv, Replace(siteNumber, policyDigits, candidate))
+    If Len(url) = 0 Then Exit Sub
+
+    drv.Get url
+    drv.Wait 1500
+    CrownDismissPhoneCheck drv
+
+    If Not CrownUaigOnPolicy(drv) Then
+        said = " No renewal under " & candidate & "."
+    Else
+        detail = CrownUaigDetail(drv)
+
+        If CrownDigits(CrownPart(detail, 0)) <> candidate Then
+            said = " No renewal under " & candidate & "."
+        ElseIf CrownDigits(CrownPart(detail, 1)) <> policyDigits Then
+            said = " " & CrownPart(detail, 0) & " exists but is not this policy's renewal (previous number " & _
+                   CrownPart(detail, 1) & ") - left alone."
+        Else
+            billing = CrownUaigBilling(drv)
+            If drv.IsElementPresent(By.ID("CURAMTDUE")) Then dueAmt = drv.FindElementById("CURAMTDUE").value
+
+            renewals.Add Array(recordId, CrownPart(detail, 0), CrownPart(detail, 3), CrownPart(detail, 4), _
+                               dueAmt, "", "", CrownPart(detail, 5), names(policyDigits), siteNumber, _
+                               CrownPart(billing, 0), CrownPart(billing, 1), CrownPart(billing, 2), CrownPart(billing, 3))
+            index.Add candidate, recordId
+            said = " RENEWED as " & CrownPart(detail, 0) & " (its Previous Policy Number is this policy)" & _
+                   IIf(Len(CrownPart(billing, 0)) > 0, ", first payment " & CrownPart(billing, 0), "") & _
+                   IIf(Len(CrownPart(billing, 1)) > 0, ", instalment " & CrownPart(billing, 1), ", instalment not set yet") & "."
+        End If
+    End If
+
+    ws.Cells(row, 11).value = ws.Cells(row, 11).value & said
+    Err.Clear
+    On Error GoTo 0
+End Sub
+
+
 ' One of those six, or nothing.
 Private Function CrownPart(ByVal packed As String, ByVal which As Long) As String
     Dim parts() As String
@@ -926,6 +1045,7 @@ Public Sub CrownUaigPaymentDue()
     Dim row As Long, done As Long, blank As Long, pick As Long, madeCount As Long
     Dim skipped As Long
     Dim cancelledOn As String
+    Dim billing As String
     Dim i As Long
 
     Set wsInput = ThisWorkbook.Worksheets("Input")
@@ -1269,6 +1389,33 @@ ReadThePolicy:
             End If
         End If
 
+        ' 27 Oct: the monthly payment and its day, on a record that still has
+        ' none ("n/a until it is there then the run will catch it"). Read
+        ' here, while this policy's own page is still on screen.
+        If Not wrongPage And UBound(parts) >= 12 Then
+            If Len(Trim$(CStr(parts(12)))) = 0 Or LCase$(Trim$(CStr(parts(12)))) = "n/a" Then
+                billing = CrownUaigBilling(drv)
+
+                If Len(CrownPart(billing, 1)) > 0 Then
+                    answer = CrownApiUpdate(CROWN_FORM_POLICY, CLng(recordId), _
+                        Array("Monthly", "Payment_day"), _
+                        Array(CrownPart(billing, 1), IIf(Len(CrownPayDayText(CrownPart(billing, 2))) > 0, _
+                              CrownPayDayText(CrownPart(billing, 2)), "n/a")))
+
+                    If InStr(1, answer, """ok"":true", vbTextCompare) > 0 Then
+                        ws.Cells(row, 11).value = ws.Cells(row, 11).value & " Monthly set to " & CrownPart(billing, 1) & "."
+                    End If
+                End If
+            End If
+        End If
+
+        ' 27 Oct: an expired policy whose renewal United filed under a new
+        ' number that the search above never shows (Jasmine Hodges).
+        If Not wrongPage And liveDigits = policyDigits _
+           And InStr(1, policyStatus, "expire", vbTextCompare) > 0 Then
+            CrownUaigFindRenewal drv, ws, row, recordId, siteNumber, policyDigits, index, names, renewals
+        End If
+
         row = row + 1
 
 NextPolicy:
@@ -1313,6 +1460,7 @@ End Sub
 ' to create behind someone's back.
 Private Function CrownMakeRenewals(ByVal renewals As Collection, ByVal ws As Object) As Long
     Dim renewal As Variant
+    Dim fields As Variant, values As Variant
     Dim listing As String, answer As String
     Dim i As Long, made As Long
 
@@ -1340,15 +1488,32 @@ Private Function CrownMakeRenewals(ByVal renewals As Collection, ByVal ws As Obj
 
         ' "March 23, 2023" is how that form writes a policy date. Sent in
         ' any other shape it goes in as text the calendar cannot read.
-        answer = CrownClone(CROWN_FORM_POLICY, CLng(renewal(0)), _
-            Array("Policy number", "Current_policy_no", "Description", _
-                  "today_date_amin", "exp_date_amin", _
-                  "Web_pymnt_due", "updated_due_date", "updated_cancel_date", _
-                  "Status_", "Update_due_dates", "Last_Updated"), _
-            Array(renewal(1), renewal(1), "Renewal", _
-                  CrownLongDate(renewal(2)), CrownLongDate(renewal(3)), _
-                  renewal(4), CrownDate(renewal(5)), CrownDate(renewal(6)), _
-                  renewal(7), "Yes", Format$(Now, "mm-dd-yyyy hh:mm AM/PM")))
+        fields = Array("Policy number", "Current_policy_no", "Description", _
+                       "today_date_amin", "exp_date_amin", _
+                       "Web_pymnt_due", "updated_due_date", "updated_cancel_date", _
+                       "Status_", "Update_due_dates", "Last_Updated")
+        values = Array(renewal(1), renewal(1), "Renewal", _
+                       CrownLongDate(renewal(2)), CrownLongDate(renewal(3)), _
+                       renewal(4), CrownDate(renewal(5)), CrownDate(renewal(6)), _
+                       renewal(7), "Yes", Format$(Now, "mm-dd-yyyy hh:mm AM/PM"))
+
+        ' 27 Oct: the new term's own money, when United showed it - the first
+        ' payment as down payment / amount to company / amount paid, the
+        ' instalment as the monthly payment (n/a until United has one).
+        If UBound(renewal) >= 13 Then
+            If Len(CStr(renewal(10))) > 0 Then
+                fields = CrownWith(fields, "Amount "): values = CrownWith(values, CStr(renewal(10)))
+                fields = CrownWith(fields, "Amount to Co"): values = CrownWith(values, CStr(renewal(10)))
+                fields = CrownWith(fields, "Amount Paid "): values = CrownWith(values, CStr(renewal(10)))
+            End If
+
+            fields = CrownWith(fields, "Monthly")
+            values = CrownWith(values, IIf(Len(CStr(renewal(11))) > 0, CStr(renewal(11)), "n/a"))
+            fields = CrownWith(fields, "Payment_day")
+            values = CrownWith(values, IIf(Len(CrownPayDayText(CStr(renewal(12)))) > 0, CrownPayDayText(CStr(renewal(12))), "n/a"))
+        End If
+
+        answer = CrownClone(CROWN_FORM_POLICY, CLng(renewal(0)), fields, values)
 
         If InStr(1, answer, """ok"":true", vbTextCompare) > 0 Then
             made = made + 1
