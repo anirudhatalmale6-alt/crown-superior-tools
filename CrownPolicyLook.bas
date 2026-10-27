@@ -489,6 +489,33 @@ Private Sub CrownPullApply(ByVal answer As String, ByVal policyNo As String, ByV
         End Select
     Next k
 
+    ' --- the right customer? ---------------------------------------------------
+    ' 26 Oct: Edit Data had Alice Stellar open and Jasmine Hodges's policy was
+    ' pulled - her drivers went onto Alice's row. Edit Data always opens on
+    ' row 2, so this is easy to do. When the carrier's insured is plainly
+    ' somebody else, ask; the safe answer is a new customer row.
+    If Not newRow Then
+        Dim theirs As String, ours As String
+
+        theirs = UCase$(Trim$(CrownPullLast(CStr(insured(1)))))
+        ours = UCase$(Trim$(wsEdit.Range("D19").Text))
+
+        If Len(theirs) > 0 And Len(ours) > 0 And theirs <> ours _
+           And InStr(1, UCase$(CStr(insured(1))), ours, vbBinaryCompare) = 0 Then
+            Select Case MsgBox(carrier & "'s policy " & policyNo & " is for " & Trim$(CStr(insured(1))) & "," & vbCrLf & _
+                               "but Edit Data has " & Trim$(wsEdit.Range("D18").Text & " " & wsEdit.Range("D19").Text) & " open (row " & wsEdit.Range("C5").value & ")." & vbCrLf & vbCrLf & _
+                               "Yes = add it as a NEW customer row (Edit Data is cleared first, " & Trim$(wsEdit.Range("D18").Text) & "'s row is not touched)" & vbCrLf & _
+                               "No = stop, nothing is changed", vbYesNo + vbExclamation, "Crown Superior")
+            Case vbYes
+                newRow = True
+                mPullBlank = True
+            Case Else
+                mPullBlank = False
+                Exit Sub
+            End Select
+        End If
+    End If
+
     ' --- compare with Edit Data ----------------------------------------------
     Set changes = New Collection
     Set notes = New Collection
