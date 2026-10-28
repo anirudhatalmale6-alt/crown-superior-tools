@@ -1930,6 +1930,27 @@ End Function
 ' policy owes nothing today, so a line dated in the past cannot be money
 ' owed - it is the statement being read by mistake, and it would put a
 ' bill the customer has already paid back on their screen.
+' "Installment For $143.16 due on 10/28/2026" from anywhere on the Verve
+' billing page, or "" when it is not there.
+Private Function CrownVervePageInstalment(ByVal drv As Object) As String
+    Dim text As String
+    Dim re As Object, hits As Object
+
+    On Error Resume Next
+    text = CStr(drv.ExecuteScript("return (document.body&&document.body.innerText)||'';"))
+    On Error GoTo 0
+
+    If Len(text) = 0 Then Exit Function
+
+    Set re = CreateObject("VBScript.RegExp")
+    re.IgnoreCase = True
+    re.Global = False
+    re.Pattern = "Installment For \$\s*[0-9,]+\.?[0-9]* due on [0-9]{1,2}/[0-9]{1,2}/[0-9]{4}"
+    Set hits = re.Execute(Replace(Replace(text, vbCr, " "), vbLf, " "))
+
+    If hits.Count > 0 Then CrownVervePageInstalment = CStr(hits(0).Value)
+End Function
+
 Private Function CrownVerveNextDue(ByVal rowsText As String, ByRef dueDate As String, _
                                    ByRef amount As String, ByRef note As String) As Boolean
     Dim rows() As String, header() As String, cells() As String
@@ -2190,6 +2211,7 @@ End Function
 
 
 Public Sub CrownVervePaymentDue()
+    Dim found As String
     Dim drv As ChromeDriver, clsDrv As Chrm
     Dim By As New Selenium.By
     Dim Keys As New Selenium.Keys
@@ -2448,6 +2470,14 @@ Public Sub CrownVervePaymentDue()
             End If
 
             activity = TryGetText(drv, VERVE_ACTIVITY, "ID", 3, 300)
+
+            ' 28 Oct (Tony): the instalment can be on the page even when this
+            ' label says something else - it is looked for anywhere on the
+            ' billing page before the run falls back to the balance.
+            If InStr(1, activity, "Installment For", vbTextCompare) = 0 Then
+                found = CrownVervePageInstalment(drv)
+                If Len(found) > 0 Then activity = found
+            End If
 
             If InStr(1, activity, "Installment For", vbTextCompare) > 0 Then
                 dueAmount = CrownMoney(CrownBetween(activity, "Installment For $", " due on"))
