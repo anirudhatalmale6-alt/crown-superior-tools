@@ -622,6 +622,78 @@ Public Function CrownUnitedAcceptAddress(ByVal drv As Object) As Boolean
 End Function
 
 
+' ---------------------------------------------------------------------
+' Review Policy instead of the rates (Tony, 29 Oct, Zayreon Paster):
+' United skips the MVR when one was run for that customer recently and
+' goes straight to Review Policy. That still means a real quote - the
+' reports have been run - so: Edit Quote, OK "Photos required", Quote,
+' OK "Agency fees ...", and the Quote Summary and Payment Options page
+' comes up with the plans on it. True once that page is there.
+' ---------------------------------------------------------------------
+Public Function CrownUnitedReviewToQuote(ByVal drv As Object) As Boolean
+    Dim answer As String
+    Dim started As Date
+
+    answer = CrownUnitedJs(drv, CrownUnitedButtonJs("edit quote"))
+    CrownNoteBlocker "United Review Policy page, Edit Quote: " & answer
+    If answer <> "clicked" Then Exit Function
+
+    ' The Edit Quote page, with its Quote button, once its alerts are OK'd.
+    started = Now
+    Do
+        drv.Wait 800
+        If Not CrownHandleAlert(drv) Then Exit Function
+
+        answer = CrownUnitedJs(drv, _
+            "if(document.readyState!=='complete')return 'wait';" & _
+            "if(!/cmn_Quote\.mac/i.test(location.href))return 'wait';" & _
+            "var b=document.querySelectorAll('input[type=button],input[type=submit],button');" & _
+            "for(var i=0;i<b.length;i++){var t=((b[i].value||'')+' '+(b[i].innerText||'')).replace(/\s+/g,' ').trim().toLowerCase();" & _
+            "if(t==='quote'||t==='quote quote')return 'ready';}return 'wait';")
+        If answer = "ready" Then Exit Do
+        DoEvents
+    Loop While (Now - started) * 86400 < APPLY_WAIT_SECONDS
+
+    If answer <> "ready" Then
+        CrownNotePage drv, "United: Edit Quote did not open from the Review Policy page"
+        Exit Function
+    End If
+
+    drv.Wait 600
+    answer = CrownUnitedJs(drv, CrownUnitedButtonJs("quote"))
+    CrownNoteBlocker "United Edit Quote page, Quote: " & answer
+    If answer <> "clicked" Then Exit Function
+
+    ' The rates page.
+    started = Now
+    Do
+        drv.Wait 800
+        If Not CrownHandleAlert(drv) Then Exit Function
+
+        answer = CrownUnitedJs(drv, _
+            "if(document.readyState!=='complete')return 'wait';" & _
+            "return document.getElementById('rowPlan')?'ready':'wait';")
+        If answer = "ready" Then
+            CrownUnitedReviewToQuote = True
+            Exit Function
+        End If
+        DoEvents
+    Loop While (Now - started) * 86400 < APPLY_WAIT_SECONDS
+
+    CrownNotePage drv, "United: after Edit Quote > Quote the payment plans did not come up"
+End Function
+
+' A script that clicks the button reading exactly that (any case), or says so.
+Private Function CrownUnitedButtonJs(ByVal words As String) As String
+    CrownUnitedButtonJs = _
+        "var w='" & LCase$(words) & "';" & _
+        "var b=document.querySelectorAll('input[type=button],input[type=submit],button,a');" & _
+        "for(var i=0;i<b.length;i++){var t=((b[i].value||'')+' '+(b[i].innerText||'')).replace(/\s+/g,' ').trim().toLowerCase();" & _
+        "if(t===w||t===w+' '+w){var x=b[i];setTimeout(function(){x.click();},50);return 'clicked';}}" & _
+        "return 'no '+w+' button';"
+End Function
+
+
 ' Run a script and hand back its answer as text; an open alert or a page
 ' mid-load comes back as "wait" rather than as an error.
 Private Function CrownUnitedJs(ByVal drv As Object, ByVal script As String, _
