@@ -849,6 +849,21 @@ Public Sub CrownUnitedDirectBill(ByVal drv As Object)
     drv.Wait 2500
     If Not CrownUnitedSettle(drv) Then Exit Sub
 
+    ' 29 Oct: the same figures came back twice (Zayreon Paster) - so it is
+    ' checked that the box really is off now, before anything is read as
+    ' the direct bill price.
+    answer = CrownUnitedJs(drv, _
+        "var tds=document.querySelectorAll('td,span,label');" & _
+        "for(var i=0;i<tds.length;i++){var t=tds[i].innerText||'';" & _
+        "if(!/automatic\s+credit\/debit\s+card\s+or\s+bank\s+transfer/i.test(t))continue;" & _
+        "var tr=tds[i].closest('tr');var c=tr&&tr.querySelector('input[type=checkbox]');if(c)return c.checked?'still on':'off';}" & _
+        "return 'no box';")
+
+    If answer = "still on" Then
+        CrownNotePage drv, "United direct bill: the auto pay box would not stay unticked - no direct bill price sent"
+        Exit Sub
+    End If
+
     ' The plan can come back unselected after the redraw.
     For tries = 1 To 3
         answer = CrownUnitedJs(drv, CrownPlanJs())

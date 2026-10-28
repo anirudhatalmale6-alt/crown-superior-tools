@@ -474,14 +474,16 @@ Private Sub CrownPullApply(ByVal answer As String, ByVal policyNo As String, ByV
 
     lines = Split(answer, vbLf)
     For k = 0 To UBound(lines)
-        f = Split(lines(k) & "||||||||", "|")
+        f = Split(lines(k) & "|||||||||", "|")
         Select Case f(0)
             Case "INS": insured = f
             Case "DRV"
-                ' only drivers the carrier still has on the policy
-                If Len(f(8)) = 0 Or InStr(1, f(8), "active", vbTextCompare) > 0 Then drivers.Add f
+                ' only drivers the carrier still has on the policy. 29 Oct: United
+                ' says "Entered" (not "Active") on some pages, and every driver was
+                ' being skipped - so only a removed one is left out now.
+                If Not CrownPullGone(CStr(f(8))) Then drivers.Add f
             Case "VEH"
-                If Len(f(5)) = 0 Or InStr(1, f(5), "active", vbTextCompare) > 0 Then vehicles.Add f
+                If Not CrownPullGone(CStr(f(5))) Then vehicles.Add f
             Case "COV": covers.Add f
             Case "LIEN": liens.Add f
             Case "ADDR": addr = f
@@ -549,6 +551,13 @@ Private Sub CrownPullApply(ByVal answer As String, ByVal policyNo As String, ByV
         If k > 1 Then
             CrownPullAdd changes, wsEdit, col & "16", "Driver " & k & " - is there a driver", "Yes"
             CrownPullAdd changes, wsEdit, col & "17", "Driver " & k & " - excluded", IIf(InStr(1, item(7), "exclud", vbTextCompare) > 0, "Yes", "No")
+
+            ' 29 Oct: the relation to driver 1 (United: "Relationship: Spouse").
+            If UBound(item) >= 9 Then
+                If Len(Trim$(CStr(item(9)))) > 0 Then
+                    CrownPullAdd changes, wsEdit, col & "23", "Driver " & k & " - relation to driver 1", StrConv(Trim$(CStr(item(9))), vbProperCase)
+                End If
+            End If
         End If
 
         If Len(item(1)) > 0 Then
@@ -836,6 +845,18 @@ End Function
 '   VEH|VIN|year|make|model|status
 '   COV|n|collision|comprehensive      (one per vehicle, in order)
 '   LIEN|name|address
+' Is a driver or vehicle off the policy, going by its status? Blank,
+' Active, Entered, Excluded and anything else are still on it.
+Private Function CrownPullGone(ByVal status As String) As Boolean
+    Dim w As Variant
+    For Each w In Array("delet", "remov", "inactive", "cancel", "dropped")
+        If InStr(1, status, CStr(w), vbTextCompare) > 0 Then
+            CrownPullGone = True
+            Exit Function
+        End If
+    Next w
+End Function
+
 Private Function CrownPullUnitedJs() As String
     CrownPullUnitedJs = _
         "var clean=function(s){return (s||'').replace(/[|\r\n]/g,' ').replace(/\s+/g,' ').trim();};" & _
@@ -847,12 +868,16 @@ Private Function CrownPullUnitedJs() As String
         "var tb=t.closest('table'),k,e;for(k=rows.indexOf(t)-1;k>=0&&k>=rows.indexOf(t)-3;k--){m=cells(rows[k]).join(' ').match(re);if(m)return clean(m[1]);if(/DOB/.test(cells(rows[k]).join(' ')))break;}" & _
         "if(tb){if(tb.caption&&(m=tb.caption.innerText.match(re)))return clean(m[1]);e=tb.previousElementSibling;" & _
         "for(k=0;k<3&&e;k++,e=e.previousElementSibling){m=(e.innerText||'').match(re);if(m)return clean(m[1]);}}return '';};" & _
+        "var near=function(t){var tb=t.closest('table'),k,e,j,txt=[];for(k=rows.indexOf(t)-1;k>=0&&k>=rows.indexOf(t)-3;k--){j=cells(rows[k]).join(' ');if(/DOB/.test(j))break;txt.push(j);}" & _
+        "if(tb){if(tb.caption)txt.push(clean(tb.caption.innerText));e=tb.previousElementSibling;for(k=0;k<3&&e;k++,e=e.previousElementSibling){j=clean(e.innerText);if(/DOB/.test(j))break;txt.push(j);}}return txt;};" & _
+        "var pick=function(t,re){var a=near(t);for(var q=0;q<a.length;q++){var m=a[q].match(re);if(m)return clean(m[1]);}return '';};" & _
+        "var reN=/(?:^|\s)name\s*:\s*([A-Za-z][A-Za-z .,'\-]*?)\s*(?:relationship|occupation|$)/i,reR=/relationship\s*:?\s*([A-Za-z][A-Za-z \-]*?)\s*(?:occupation|$)/i;" & _
         "var cov=0,inCov=false,coll='',comp='',inLien=false;"
     CrownPullUnitedJs = CrownPullUnitedJs & _
         "for(var i=0;i<rows.length;i++){var c=cells(rows[i]),line=c.join(' ');" & _
         "if(c.indexOf('DOB')>=0&&c.indexOf('Gender')>=0){var d=cells(rows[i+1]);" & _
         "var g=function(k){for(var q=0;q<c.length;q++){if(c[q].toLowerCase().indexOf(k)===0)return q<d.length?d[q]:'';}return '';};" & _
-        "out.push('DRV|'+[nameNear(rows[i]),g('dob'),g('gender'),g('mar'),g('license')||g('id#'),g('st'),g('driver type'),g('status')].join('|'));continue;}" & _
+        "out.push('DRV|'+[nameNear(rows[i])||pick(rows[i],reN),g('dob'),g('gender'),g('mar'),g('license')||g('id#'),g('st'),g('driver type'),g('status'),pick(rows[i],reR)].join('|'));continue;}" & _
         "if(c.indexOf('VIN#')>=0&&c.indexOf('Year')>=0){var v=cells(rows[i+1]);" & _
         "var h=function(k){var q=c.indexOf(k);return q>=0&&q<v.length?v[q]:'';};" & _
         "out.push('VEH|'+[h('VIN#'),h('Year'),h('Make'),h('Model'),h('Status')].join('|'));continue;}" & _
