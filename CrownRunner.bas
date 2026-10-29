@@ -75,6 +75,7 @@ Public Sub CrownRunQuotes()
     Dim carriers As Collection
     Dim doUnited As Boolean, doVerve As Boolean
     Dim priced As Boolean, vNote As String, gaveUp As Long
+    Dim uNoPrice As Boolean, uNote As String
 
     json = CrownQuoteWork(RUN_MOST)
 
@@ -287,6 +288,12 @@ Public Sub CrownRunQuotes()
         ws.Cells(row, 6).value = note
         row = row + 1
 
+        ' 29 Oct (Tony: "why didn't it relate any message regarding the
+        ' united quote"): United tried and gave nothing, without saying no.
+        uNoPrice = doUnited And loaded And Len(down) = 0 And Len(monthly) = 0 _
+                   And Len(CrownLastStopReason) = 0
+        uNote = note
+
         ' Then Verve for the same customer - whatever United did. If United
         ' would not quote (the weather notice) this is the price they get.
         If loaded And doVerve Then
@@ -300,6 +307,16 @@ Public Sub CrownRunQuotes()
             End If
 
             row = row + 1
+        End If
+
+        ' One company priced, the other did not: the card on the website says
+        ' which was tried and why. (Nothing priced is handled just below.)
+        If priced Then
+            On Error Resume Next
+            If uNoPrice Then CrownQuoteNote CLng(ids(i)), "United", uNote
+            If doVerve And Len(vNote) > 0 Then CrownQuoteNote CLng(ids(i)), "Verve", vNote
+            Err.Clear
+            On Error GoTo Finished
         End If
 
         ' Nothing reached the website for this customer. Left alone it

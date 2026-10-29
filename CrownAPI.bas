@@ -350,6 +350,16 @@ End Function
 ' the same customer over and over. The website counts these and, after
 ' its limit (two), takes the request off the tool's list and marks it
 ' "left to you" with this reason, where it can be put back with a click.
+' One company was tried and gave no price while the other did (29 Oct): shown
+' on the customer's card on the website, not counted as a failed try.
+Public Function CrownQuoteNote(ByVal submissionId As Long, ByVal carrier As String, ByVal reason As String) As String
+    CrownQuoteNote = CrownPost(CrownBody("quotefail") _
+                   & "&id=" & submissionId _
+                   & "&note_only=1" _
+                   & "&carrier=" & CrownEnc(carrier) _
+                   & "&reason=" & CrownEnc(Left$(reason, 150)))
+End Function
+
 Public Function CrownQuoteFail(ByVal submissionId As Long, ByVal reason As String) As String
     CrownQuoteFail = CrownPost(CrownBody("quotefail") _
                    & "&id=" & submissionId _
