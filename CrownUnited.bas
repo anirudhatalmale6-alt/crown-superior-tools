@@ -33,6 +33,7 @@ Public CrownUnitedPayToday As String
 ' The direct bill (no auto pay) quote, read after the auto pay one (24 Oct).
 Public CrownUnitedDirectDown As String
 Public CrownUnitedDirectMonthly As String
+Public CrownUnitedDirectFirstDue As String   ' 29 Oct: First Due Date of the direct bill plan
 
 Private Const LS_WAIT_SECONDS As Long = 45
 Private Const PREMIUM_WAIT_SECONDS As Long = 30
@@ -829,6 +830,7 @@ Public Sub CrownUnitedDirectBill(ByVal drv As Object)
 
     CrownUnitedDirectDown = ""
     CrownUnitedDirectMonthly = ""
+    CrownUnitedDirectFirstDue = ""
 
     answer = CrownUnitedJs(drv, _
         "var box=null,tds=document.querySelectorAll('td,span,label');" & _
@@ -881,7 +883,8 @@ Public Sub CrownUnitedDirectBill(ByVal drv As Object)
         "function num(t){var m=String(t).replace(/,/g,'').match(/\$\s*([0-9]+(?:\.[0-9]+)?)/);return m?m[1]:'';}" & _
         "var down=num(cell('rowDown'));var inst=cell('rowInstAmt');" & _
         "var m=inst.replace(/,/g,'').match(/installment\s*1\s*:\s*\$\s*([0-9]+(?:\.[0-9]+)?)/i);" & _
-        "var mon=m?m[1]:num(inst);return down+'|'+mon;")
+        "var mon=m?m[1]:num(inst);var due=(cell('rowFirstDue').match(/\d{1,2}[-\/]\d{1,2}[-\/]\d{4}/)||[''])[0];" & _
+        "return down+'|'+mon+'|'+due;")
 
     If InStr(1, figures, "|") = 0 Or Left$(figures, 1) = "|" Then
         CrownNotePage drv, "United direct bill: could not read the 16.67% figures (" & figures & ")"
@@ -890,6 +893,7 @@ Public Sub CrownUnitedDirectBill(ByVal drv As Object)
 
     CrownUnitedDirectDown = Split(figures, "|")(0)
     CrownUnitedDirectMonthly = Split(figures, "|")(1)
+    If UBound(Split(figures, "|")) >= 2 Then CrownUnitedDirectFirstDue = Split(figures, "|")(2)
 
     CrownNoteBlocker "United direct bill: down " & CrownUnitedDirectDown & ", installment " & CrownUnitedDirectMonthly
 End Sub

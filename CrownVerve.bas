@@ -36,6 +36,9 @@ Private Const VERVE_DIRECT_PLAN As String = "5 Pay 16.67% Down"
 
 Public CrownVerveDirectDown As String
 Public CrownVerveDirectMonthly As String
+' First payment due date of each (29 Oct), from the pay plan's Due Date column.
+Public CrownVerveFirstDue As String
+Public CrownVerveDirectFirstDue As String
 
 ' Words that only appear on the pages they belong to.
 Private Const ON_COVERAGES As String = "Vehicle Level Coverages"
@@ -228,6 +231,8 @@ Private Function CrownVerveReadPlan(ByVal drv As ChromeDriver, ByRef down As Str
 
     CrownVerveDirectDown = ""
     CrownVerveDirectMonthly = ""
+    CrownVerveFirstDue = ""
+    CrownVerveDirectFirstDue = ""
 
     rows = CrownVervePlanRows(drv)
 
@@ -242,6 +247,7 @@ Private Function CrownVerveReadPlan(ByVal drv As ChromeDriver, ByRef down As Str
                 If UBound(cells) >= c + 5 Then
                     CrownVerveDirectDown = CrownPlainMoney(cells(c + 1))
                     CrownVerveDirectMonthly = CrownPlainMoney(cells(c + 5))
+                    If UBound(cells) >= c + 6 Then CrownVerveDirectFirstDue = Trim$(cells(c + 6))
                 End If
 
                 Exit For
@@ -278,6 +284,7 @@ Private Function CrownVerveReadPlan(ByVal drv As ChromeDriver, ByRef down As Str
         If at >= 0 And UBound(cells) >= at + 5 Then
             down = CrownPlainMoney(cells(at + 1))
             monthly = CrownPlainMoney(cells(at + 5))
+            If UBound(cells) >= at + 6 Then CrownVerveFirstDue = Trim$(cells(at + 6))
 
             If Len(down) > 0 Or Len(monthly) > 0 Then term = "6 months"
 

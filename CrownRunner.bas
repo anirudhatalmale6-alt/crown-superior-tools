@@ -76,6 +76,7 @@ Public Sub CrownRunQuotes()
     Dim doUnited As Boolean, doVerve As Boolean
     Dim priced As Boolean, vNote As String, gaveUp As Long
     Dim uNoPrice As Boolean, uNote As String
+    Dim uDue As String
 
     json = CrownQuoteWork(RUN_MOST)
 
@@ -171,6 +172,7 @@ Public Sub CrownRunQuotes()
         note = ""
         carrier = "United Auto"
         down = ""
+        uDue = ""
         monthly = ""
         term = ""
 
@@ -219,7 +221,7 @@ Public Sub CrownRunQuotes()
             after = CrownQuotePayRows()
 
             If after > before Then
-                CrownReadQuotePayRow after, down, monthly, term
+                CrownReadQuotePayRow after, down, monthly, term, uDue
             ElseIf Len(CrownLastStopReason) > 0 Then
                 ' United said no for a reason of its own - the weather notice.
                 ' His words: "I would expect this msg to be transposed back to
@@ -253,8 +255,8 @@ Public Sub CrownRunQuotes()
 
         If Len(down) > 0 Or Len(monthly) > 0 Then
             answer = CrownQuoteResult(CLng(ids(i)), _
-                Array("carrier", "state", "down", "monthly", "term", "who", "plan"), _
-                Array(carrier, "quoted", down, monthly, term, "the quoting tool", "autopay"))
+                Array("carrier", "state", "down", "monthly", "term", "who", "plan", "due"), _
+                Array(carrier, "quoted", down, monthly, term, "the quoting tool", "autopay", uDue))
 
             If InStr(1, answer, """ok"":true", vbTextCompare) > 0 Then
                 did = did + 1
@@ -265,8 +267,9 @@ Public Sub CrownRunQuotes()
                 ' And the direct bill (no auto pay) quote, when United gave one.
                 If Len(CrownUnitedDirectDown) > 0 Or Len(CrownUnitedDirectMonthly) > 0 Then
                     If InStr(1, CrownQuoteResult(CLng(ids(i)), _
-                            Array("carrier", "state", "down", "monthly", "term", "who", "plan"), _
-                            Array(carrier, "quoted", CrownUnitedDirectDown, CrownUnitedDirectMonthly, term, "the quoting tool", "direct")), _
+                            Array("carrier", "state", "down", "monthly", "term", "who", "plan", "due"), _
+                            Array(carrier, "quoted", CrownUnitedDirectDown, CrownUnitedDirectMonthly, term, "the quoting tool", "direct", _
+                                  IIf(Len(CrownUnitedDirectFirstDue) > 0, CrownUnitedDirectFirstDue, uDue))), _
                             """ok"":true", vbTextCompare) > 0 Then
                         note = Trim$(note & " / direct bill: down " & CrownUnitedDirectDown & ", monthly " & CrownUnitedDirectMonthly)
                         CrownLogQuoteHistory carrier & " (direct bill)", CrownUnitedDirectDown, CrownUnitedDirectMonthly, term
@@ -410,7 +413,8 @@ End Function
 ' instalment, because a number derived from another number is a number
 ' that can be wrong in a new way.
 Private Sub CrownReadQuotePayRow(ByVal row As Long, ByRef down As String, _
-                                 ByRef monthly As String, ByRef term As String)
+                                 ByRef monthly As String, ByRef term As String, _
+                                 Optional ByRef firstDue As String)
     Dim ws As Worksheet
 
     On Error Resume Next
@@ -421,6 +425,8 @@ Private Sub CrownReadQuotePayRow(ByVal row As Long, ByRef down As String, _
 
     down = CrownPlainMoney(ws.Cells(row, "M").value)
     monthly = CrownPlainMoney(ws.Cells(row, "N").value)
+    ' 29 Oct: L is United's First Due Date for the plan.
+    firstDue = Trim$(ws.Cells(row, "L").Text)
 
     If Len(down) > 0 Or Len(monthly) > 0 Then term = "6 months"
 End Sub
@@ -587,8 +593,8 @@ Private Function CrownRunVerve(ByVal ws As Worksheet, ByVal row As Long, _
 
     If Len(down) > 0 Or Len(monthly) > 0 Then
         answer = CrownQuoteResult(id, _
-            Array("carrier", "state", "down", "monthly", "term", "who", "plan"), _
-            Array("Verve", "quoted", down, monthly, term, "the quoting tool", "autopay"))
+            Array("carrier", "state", "down", "monthly", "term", "who", "plan", "due"), _
+            Array("Verve", "quoted", down, monthly, term, "the quoting tool", "autopay", CrownVerveFirstDue))
 
         If InStr(1, answer, """ok"":true", vbTextCompare) > 0 Then
             CrownRunVerve = True
@@ -598,8 +604,8 @@ Private Function CrownRunVerve(ByVal ws As Worksheet, ByVal row As Long, _
             ' And the direct bill row (5 Pay 16.67% Down - no CC, no EFT).
             If Len(CrownVerveDirectDown) > 0 Or Len(CrownVerveDirectMonthly) > 0 Then
                 If InStr(1, CrownQuoteResult(id, _
-                        Array("carrier", "state", "down", "monthly", "term", "who", "plan"), _
-                        Array("Verve", "quoted", CrownVerveDirectDown, CrownVerveDirectMonthly, term, "the quoting tool", "direct")), _
+                        Array("carrier", "state", "down", "monthly", "term", "who", "plan", "due"), _
+                        Array("Verve", "quoted", CrownVerveDirectDown, CrownVerveDirectMonthly, term, "the quoting tool", "direct", CrownVerveDirectFirstDue)), _
                         """ok"":true", vbTextCompare) > 0 Then
                     note = note & " / direct bill: down " & CrownVerveDirectDown & ", monthly " & CrownVerveDirectMonthly
                     CrownLogQuoteHistory "Verve (direct bill)", CrownVerveDirectDown, CrownVerveDirectMonthly, term
