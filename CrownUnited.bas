@@ -815,6 +815,21 @@ Private Function CrownOutputColumn(ByVal heading As String) As Long
 End Function
 
 
+' The 16.67% plan's figures as "down|first installment|first due date".
+Private Function CrownDirectFiguresJs() As String
+    CrownDirectFiguresJs = _
+        "var pr=document.getElementById('rowPlan');if(!pr)return 'no plan table';" & _
+        "var col=-1;for(var i=0;i<pr.cells.length;i++){if(/16\.67\s*%/.test(pr.cells[i].innerText||'')){col=i;break;}}" & _
+        "if(col<0)return 'no 16.67 column';" & _
+        "function cell(id){var r=document.getElementById(id);return r&&r.cells[col]?(r.cells[col].innerText||''):'';}" & _
+        "function num(t){var m=String(t).replace(/,/g,'').match(/\$\s*([0-9]+(?:\.[0-9]+)?)/);return m?m[1]:'';}" & _
+        "var down=num(cell('rowDown'));var inst=cell('rowInstAmt');" & _
+        "var m=inst.replace(/,/g,'').match(/installment\s*1\s*:\s*\$\s*([0-9]+(?:\.[0-9]+)?)/i);" & _
+        "var mon=m?m[1]:num(inst);var due=(cell('rowFirstDue').match(/\d{1,2}[-\/]\d{1,2}[-\/]\d{4}/)||[''])[0];" & _
+        "return down+'|'+mon+'|'+due;"
+End Function
+
+
 ' ---------------------------------------------------------------------
 ' The direct bill quote (Tony, 24 Oct): "on united you have to uncheck the
 ' box for autopayments credit/debit then scrape quote from the same box".
@@ -827,10 +842,16 @@ End Function
 Public Sub CrownUnitedDirectBill(ByVal drv As Object)
     Dim answer As String, figures As String
     Dim tries As Long
+    Dim before As String, started As Date, recalced As Boolean
 
     CrownUnitedDirectDown = ""
     CrownUnitedDirectMonthly = ""
     CrownUnitedDirectFirstDue = ""
+
+    ' 30 Oct (Tony, Siera Knight: "repeating same monthly payment for direct
+    ' bill and autopay - this is impossible"): the auto pay figures first, so
+    ' the direct bill ones are only taken once United has actually changed them.
+    before = CrownUnitedJs(drv, CrownDirectFiguresJs())
 
     answer = CrownUnitedJs(drv, _
         "var box=null,tds=document.querySelectorAll('td,span,label');" & _
@@ -875,16 +896,44 @@ Public Sub CrownUnitedDirectBill(ByVal drv As Object)
         If Not CrownUnitedSettle(drv) Then Exit Sub
     Next tries
 
-    figures = CrownUnitedJs(drv, _
-        "var pr=document.getElementById('rowPlan');if(!pr)return 'no plan table';" & _
-        "var col=-1;for(var i=0;i<pr.cells.length;i++){if(/16\.67\s*%/.test(pr.cells[i].innerText||'')){col=i;break;}}" & _
-        "if(col<0)return 'no 16.67 column';" & _
-        "function cell(id){var r=document.getElementById(id);return r&&r.cells[col]?(r.cells[col].innerText||''):'';}" & _
-        "function num(t){var m=String(t).replace(/,/g,'').match(/\$\s*([0-9]+(?:\.[0-9]+)?)/);return m?m[1]:'';}" & _
-        "var down=num(cell('rowDown'));var inst=cell('rowInstAmt');" & _
-        "var m=inst.replace(/,/g,'').match(/installment\s*1\s*:\s*\$\s*([0-9]+(?:\.[0-9]+)?)/i);" & _
-        "var mon=m?m[1]:num(inst);var due=(cell('rowFirstDue').match(/\d{1,2}[-\/]\d{1,2}[-\/]\d{4}/)||[''])[0];" & _
-        "return down+'|'+mon+'|'+due;")
+    ' Wait for United to re-price. If the monthly has not moved, press the
+    ' 16.67% plan's Re-calculate once and wait again. Still the same = no
+    ' direct bill price is sent, rather than a copy of the auto pay one.
+    started = Now
+    Do
+        figures = CrownUnitedJs(drv, CrownDirectFiguresJs())
+
+        If InStr(1, figures, "|") > 0 And InStr(1, before, "|") > 0 Then
+            If Split(figures, "|")(1) <> Split(before, "|")(1) Then Exit Do
+        ElseIf InStr(1, before, "|") = 0 Then
+            Exit Do                       ' nothing to compare with - take what is there
+        End If
+
+        If Not recalced And (Now - started) * 86400 > 12 Then
+            recalced = True
+            answer = CrownUnitedJs(drv, _
+                "var pr=document.getElementById('rowPlan');if(!pr)return 'no plan table';" & _
+                "var col=-1;for(var i=0;i<pr.cells.length;i++){if(/16\.67\s*%/.test(pr.cells[i].innerText||'')){col=i;break;}}" & _
+                "if(col<0)return 'no 16.67 column';var tb=pr.closest('table');" & _
+                "for(var j=0;j<tb.rows.length;j++){var c=tb.rows[j].cells[col];if(!c)continue;" & _
+                "var b=[].slice.call(c.querySelectorAll('input,button')).filter(function(x){return /re-?calculate/i.test((x.value||'')+(x.innerText||''));})[0];" & _
+                "if(b){setTimeout(function(){b.click();},50);return 'clicked';}}return 'no re-calculate button';")
+            CrownNoteBlocker "United direct bill: figures unchanged after unticking - Re-calculate: " & answer
+            drv.Wait 2500
+            If Not CrownUnitedSettle(drv) Then Exit Sub
+        End If
+
+        drv.Wait 1000
+        DoEvents
+    Loop While (Now - started) * 86400 < 30
+
+    If InStr(1, figures, "|") > 0 And InStr(1, before, "|") > 0 Then
+        If Split(figures, "|")(1) = Split(before, "|")(1) Then
+            CrownNotePage drv, "United direct bill: the monthly stayed " & Split(figures, "|")(1) & _
+                               " with auto pay off - no direct bill price sent (it would only be a copy)"
+            Exit Sub
+        End If
+    End If
 
     If InStr(1, figures, "|") = 0 Or Left$(figures, 1) = "|" Then
         CrownNotePage drv, "United direct bill: could not read the 16.67% figures (" & figures & ")"
