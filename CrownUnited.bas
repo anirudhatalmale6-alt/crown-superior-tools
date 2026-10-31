@@ -35,6 +35,17 @@ Public CrownUnitedDirectDown As String
 Public CrownUnitedDirectMonthly As String
 Public CrownUnitedDirectFirstDue As String   ' 29 Oct: First Due Date of the direct bill plan
 
+' 31 Oct (Tony's screenshots, Kenishia Rachel): United's final payment page
+' opens WITHOUT auto pay - the box "Select for Automatic Credit/Debit card or
+' Bank Transfer(EFT)" unticked - and those figures are the DIRECT BILL price.
+' The auto pay price only comes once the box is ticked AND Credit/Debit Card
+' (beside it) is chosen. Until now the tool read the first figures as auto
+' pay, found nothing to untick, and had no second price.
+Public CrownUnitedAutoDown As String
+Public CrownUnitedAutoMonthly As String
+Public CrownUnitedAutoFirstDue As String
+Public CrownUnitedPagePlan As String         ' the plan on screen when QuotePay was written: "direct" / "autopay"
+
 Private Const LS_WAIT_SECONDS As Long = 45
 Private Const PREMIUM_WAIT_SECONDS As Long = 30
 Private Const APPLY_WAIT_SECONDS As Long = 45
@@ -831,61 +842,83 @@ End Function
 
 
 ' ---------------------------------------------------------------------
-' The direct bill quote (Tony, 24 Oct): "on united you have to uncheck the
-' box for autopayments credit/debit then scrape quote from the same box".
-' Run after the auto pay figures have been read. Unticks "Select for
-' Automatic Credit/Debit card or Bank Transfer(EFT)", lets United redraw,
-' makes sure 16.67% DOWN PAY is still the plan, and reads its down payment
-' and first installment into CrownUnitedDirectDown / CrownUnitedDirectMonthly.
-' Leaves them empty, with a QuoteLook note, when it cannot.
+' Both United prices from the final payment page (24 Oct, redone 31 Oct).
+'
+' Tony, 31 Oct: "There is always 2 prices auto pay and when not checked its
+' direct bill." The page opens with the auto pay box unticked = DIRECT BILL.
+' Ticking "Select for Automatic Credit/Debit card or Bank Transfer(EFT)" alone
+' changes nothing; choosing Credit/Debit Card beside it re-prices = AUTO PAY.
+'
+' Run after ProcessPaymentPageSimple has written the QuotePay row. Works out
+' which plan the page is on, keeps those 16.67% figures as that plan, then
+' switches to the other plan and reads it once United has re-priced. A plan
+' whose figures never change is not sent (it would only be a copy).
 ' ---------------------------------------------------------------------
 Public Sub CrownUnitedDirectBill(ByVal drv As Object)
-    Dim answer As String, figures As String
+    Dim answer As String, figures As String, before As String, state As String
     Dim tries As Long
-    Dim before As String, started As Date, recalced As Boolean
+    Dim started As Date, recalced As Boolean
+    Dim wasAuto As Boolean
 
     CrownUnitedDirectDown = ""
     CrownUnitedDirectMonthly = ""
     CrownUnitedDirectFirstDue = ""
+    CrownUnitedAutoDown = ""
+    CrownUnitedAutoMonthly = ""
+    CrownUnitedAutoFirstDue = ""
+    CrownUnitedPagePlan = ""
 
-    ' 30 Oct (Tony, Siera Knight: "repeating same monthly payment for direct
-    ' bill and autopay - this is impossible"): the auto pay figures first, so
-    ' the direct bill ones are only taken once United has actually changed them.
     before = CrownUnitedJs(drv, CrownDirectFiguresJs())
+    state = CrownUnitedJs(drv, CrownAutoPayStateJs())
 
-    answer = CrownUnitedJs(drv, _
-        "var box=null,tds=document.querySelectorAll('td,span,label');" & _
-        "for(var i=0;i<tds.length&&!box;i++){var t=tds[i].innerText||'';" & _
-        "if(!/automatic\s+credit\/debit\s+card\s+or\s+bank\s+transfer/i.test(t))continue;" & _
-        "var tr=tds[i].closest('tr');var c=tr&&tr.querySelector('input[type=checkbox]');if(c)box=c;}" & _
-        "if(!box)return 'no auto pay box';if(!box.checked)return 'already off';" & _
-        "setTimeout(function(){box.click();},50);return 'unticked';")
-
-    If answer = "no auto pay box" Then
-        ' Page and all, so the box (or the page it is on) can be found.
-        CrownNotePage drv, "United direct bill: no auto pay box on this page"
+    If state = "no box" Then
+        CrownNotePage drv, "United: no auto pay box on the payment page - only one price read"
         Exit Sub
     End If
 
-    CrownNoteBlocker "United direct bill: auto pay box " & answer
+    ' Auto pay only when the box is ticked AND Credit/Debit Card is chosen.
+    wasAuto = (state = "box on, card on")
+    CrownUnitedPagePlan = IIf(wasAuto, "autopay", "direct")
+    CrownNoteBlocker "United payment page opened as " & IIf(wasAuto, "AUTO PAY", "DIRECT BILL") & " (" & state & ")"
+
+    If InStr(1, before, "|") > 0 And Left$(before, 1) <> "|" Then
+        If wasAuto Then
+            CrownUnitedAutoDown = Split(before, "|")(0)
+            CrownUnitedAutoMonthly = Split(before, "|")(1)
+            If UBound(Split(before, "|")) >= 2 Then CrownUnitedAutoFirstDue = Split(before, "|")(2)
+        Else
+            CrownUnitedDirectDown = Split(before, "|")(0)
+            CrownUnitedDirectMonthly = Split(before, "|")(1)
+            If UBound(Split(before, "|")) >= 2 Then CrownUnitedDirectFirstDue = Split(before, "|")(2)
+        End If
+    End If
+
+    If wasAuto Then
+        ' To direct bill: untick the box.
+        answer = CrownUnitedJs(drv, CrownAutoPayBoxJs(False))
+        CrownNoteBlocker "United: auto pay box " & answer
+    Else
+        ' To auto pay: tick the box (United may ask about a credit check - OK'd),
+        ' then choose Credit/Debit Card beside it.
+        answer = CrownUnitedJs(drv, CrownAutoPayBoxJs(True))
+        CrownNoteBlocker "United: auto pay box " & answer
+
+        If answer = "ticked" Then
+            drv.Wait 2500
+            If Not CrownUnitedSettle(drv) Then Exit Sub
+        End If
+
+        answer = CrownUnitedJs(drv, CrownCardJs())
+        CrownNoteBlocker "United: Credit/Debit Card (auto pay) " & answer
+
+        If Left$(answer, 2) <> "ok" Then
+            CrownNotePage drv, "United: could not choose Credit/Debit Card for auto pay - only the direct bill price read"
+            Exit Sub
+        End If
+    End If
 
     drv.Wait 2500
     If Not CrownUnitedSettle(drv) Then Exit Sub
-
-    ' 29 Oct: the same figures came back twice (Zayreon Paster) - so it is
-    ' checked that the box really is off now, before anything is read as
-    ' the direct bill price.
-    answer = CrownUnitedJs(drv, _
-        "var tds=document.querySelectorAll('td,span,label');" & _
-        "for(var i=0;i<tds.length;i++){var t=tds[i].innerText||'';" & _
-        "if(!/automatic\s+credit\/debit\s+card\s+or\s+bank\s+transfer/i.test(t))continue;" & _
-        "var tr=tds[i].closest('tr');var c=tr&&tr.querySelector('input[type=checkbox]');if(c)return c.checked?'still on':'off';}" & _
-        "return 'no box';")
-
-    If answer = "still on" Then
-        CrownNotePage drv, "United direct bill: the auto pay box would not stay unticked - no direct bill price sent"
-        Exit Sub
-    End If
 
     ' The plan can come back unselected after the redraw.
     For tries = 1 To 3
@@ -897,8 +930,7 @@ Public Sub CrownUnitedDirectBill(ByVal drv As Object)
     Next tries
 
     ' Wait for United to re-price. If the monthly has not moved, press the
-    ' 16.67% plan's Re-calculate once and wait again. Still the same = no
-    ' direct bill price is sent, rather than a copy of the auto pay one.
+    ' 16.67% plan's Re-calculate once and wait again.
     started = Now
     Do
         figures = CrownUnitedJs(drv, CrownDirectFiguresJs())
@@ -918,7 +950,7 @@ Public Sub CrownUnitedDirectBill(ByVal drv As Object)
                 "for(var j=0;j<tb.rows.length;j++){var c=tb.rows[j].cells[col];if(!c)continue;" & _
                 "var b=[].slice.call(c.querySelectorAll('input,button')).filter(function(x){return /re-?calculate/i.test((x.value||'')+(x.innerText||''));})[0];" & _
                 "if(b){setTimeout(function(){b.click();},50);return 'clicked';}}return 'no re-calculate button';")
-            CrownNoteBlocker "United direct bill: figures unchanged after unticking - Re-calculate: " & answer
+            CrownNoteBlocker "United: figures unchanged after switching plan - Re-calculate: " & answer
             drv.Wait 2500
             If Not CrownUnitedSettle(drv) Then Exit Sub
         End If
@@ -927,22 +959,65 @@ Public Sub CrownUnitedDirectBill(ByVal drv As Object)
         DoEvents
     Loop While (Now - started) * 86400 < 30
 
-    If InStr(1, figures, "|") > 0 And InStr(1, before, "|") > 0 Then
+    If InStr(1, figures, "|") = 0 Or Left$(figures, 1) = "|" Then
+        CrownNotePage drv, "United: could not read the 16.67% figures after switching to " & _
+                           IIf(wasAuto, "direct bill", "auto pay") & " (" & figures & ")"
+        Exit Sub
+    End If
+
+    If InStr(1, before, "|") > 0 Then
         If Split(figures, "|")(1) = Split(before, "|")(1) Then
-            CrownNotePage drv, "United direct bill: the monthly stayed " & Split(figures, "|")(1) & _
-                               " with auto pay off - no direct bill price sent (it would only be a copy)"
+            CrownNotePage drv, "United: the monthly stayed " & Split(figures, "|")(1) & " after switching to " & _
+                               IIf(wasAuto, "direct bill", "auto pay") & " - that price not sent (it would only be a copy)"
             Exit Sub
         End If
     End If
 
-    If InStr(1, figures, "|") = 0 Or Left$(figures, 1) = "|" Then
-        CrownNotePage drv, "United direct bill: could not read the 16.67% figures (" & figures & ")"
-        Exit Sub
+    If wasAuto Then
+        CrownUnitedDirectDown = Split(figures, "|")(0)
+        CrownUnitedDirectMonthly = Split(figures, "|")(1)
+        If UBound(Split(figures, "|")) >= 2 Then CrownUnitedDirectFirstDue = Split(figures, "|")(2)
+    Else
+        CrownUnitedAutoDown = Split(figures, "|")(0)
+        CrownUnitedAutoMonthly = Split(figures, "|")(1)
+        If UBound(Split(figures, "|")) >= 2 Then CrownUnitedAutoFirstDue = Split(figures, "|")(2)
     End If
 
-    CrownUnitedDirectDown = Split(figures, "|")(0)
-    CrownUnitedDirectMonthly = Split(figures, "|")(1)
-    If UBound(Split(figures, "|")) >= 2 Then CrownUnitedDirectFirstDue = Split(figures, "|")(2)
-
-    CrownNoteBlocker "United direct bill: down " & CrownUnitedDirectDown & ", installment " & CrownUnitedDirectMonthly
+    CrownNoteBlocker "United: auto pay down " & CrownUnitedAutoDown & ", installment " & CrownUnitedAutoMonthly & _
+                     " / direct bill down " & CrownUnitedDirectDown & ", installment " & CrownUnitedDirectMonthly
 End Sub
+
+' "box on, card on" / "box on, card off" / "box off" / "no box" - the auto pay
+' box and the Credit/Debit Card choice beside it (the smallest cell holding
+' both "Credit/Debit Card" and "Bank Transfer", as CrownCardJs finds it).
+Private Function CrownAutoPayStateJs() As String
+    CrownAutoPayStateJs = _
+        "var box=document.getElementById('ChkEFT');" & _
+        "if(!box){var tds=document.querySelectorAll('td,span,label');" & _
+        "for(var i=0;i<tds.length&&!box;i++){var t=tds[i].innerText||'';" & _
+        "if(!/automatic\s+credit\/debit\s+card\s+or\s+bank\s+transfer/i.test(t))continue;" & _
+        "var tr=tds[i].closest('tr');var c=tr&&tr.querySelector('input[type=checkbox]');if(c)box=c;}}" & _
+        "if(!box)return 'no box';if(!box.checked)return 'box off';" & _
+        "var best=null,cs=document.querySelectorAll('td');" & _
+        "for(var j=0;j<cs.length;j++){var s=cs[j].innerText||'';" & _
+        "if(!/credit\/debit card/i.test(s)||!/bank transfer/i.test(s))continue;" & _
+        "if(!cs[j].querySelector('input[type=radio]'))continue;" & _
+        "if(!best||s.length<(best.innerText||'').length)best=cs[j];}" & _
+        "var r=best?best.querySelector('input[type=radio]'):null;" & _
+        "return 'box on, card '+(r&&r.checked?'on':'off');"
+End Function
+
+' Tick (wantOn) or untick the auto pay box: "ticked" / "unticked" /
+' "already on" / "already off" / "no auto pay box".
+Private Function CrownAutoPayBoxJs(ByVal wantOn As Boolean) As String
+    CrownAutoPayBoxJs = _
+        "var want=" & IIf(wantOn, "true", "false") & ";" & _
+        "var box=document.getElementById('ChkEFT');" & _
+        "if(!box){var tds=document.querySelectorAll('td,span,label');" & _
+        "for(var i=0;i<tds.length&&!box;i++){var t=tds[i].innerText||'';" & _
+        "if(!/automatic\s+credit\/debit\s+card\s+or\s+bank\s+transfer/i.test(t))continue;" & _
+        "var tr=tds[i].closest('tr');var c=tr&&tr.querySelector('input[type=checkbox]');if(c)box=c;}}" & _
+        "if(!box)return 'no auto pay box';" & _
+        "if(box.checked===want)return want?'already on':'already off';" & _
+        "setTimeout(function(){box.click();},50);return want?'ticked':'unticked';"
+End Function

@@ -210,6 +210,15 @@ Public Sub CrownRunQuotes()
             CrownLastStopState = ""
             CrownLastAlert = ""
 
+            ' Nor one customer's second United price the next one's.
+            CrownUnitedDirectDown = ""
+            CrownUnitedDirectMonthly = ""
+            CrownUnitedDirectFirstDue = ""
+            CrownUnitedAutoDown = ""
+            CrownUnitedAutoMonthly = ""
+            CrownUnitedAutoFirstDue = ""
+            CrownUnitedPagePlan = ""
+
             ' His own quoting, exactly as he runs it by hand.
             On Error Resume Next
             Err.Clear
@@ -253,19 +262,34 @@ Public Sub CrownRunQuotes()
             End If
         End If
 
+        ' 31 Oct: which plan the QuotePay figures are. United's page opens as
+        ' direct bill, so normally they are the direct bill price and the auto
+        ' pay one comes from CrownUnitedDirectBill.
+        Dim pPlan As String, pDown As String, pMonthly As String, pDue As String, extraDirect As Boolean
+
+        pPlan = "autopay": pDown = down: pMonthly = monthly: pDue = uDue: extraDirect = True
+
+        If Len(CrownUnitedAutoMonthly) > 0 And CrownUnitedPagePlan = "direct" Then
+            pDown = CrownUnitedAutoDown: pMonthly = CrownUnitedAutoMonthly
+            If Len(CrownUnitedAutoFirstDue) > 0 Then pDue = CrownUnitedAutoFirstDue
+        ElseIf CrownUnitedPagePlan = "direct" Then
+            ' Only the direct bill price came back: sent as what it is.
+            pPlan = "direct": extraDirect = False
+        End If
+
         If Len(down) > 0 Or Len(monthly) > 0 Then
             answer = CrownQuoteResult(CLng(ids(i)), _
                 Array("carrier", "state", "down", "monthly", "term", "who", "plan", "due"), _
-                Array(carrier, "quoted", down, monthly, term, "the quoting tool", "autopay", uDue))
+                Array(carrier, "quoted", pDown, pMonthly, term, "the quoting tool", pPlan, pDue))
 
             If InStr(1, answer, """ok"":true", vbTextCompare) > 0 Then
                 did = did + 1
                 inARow = 0
                 priced = True
-                CrownLogQuoteHistory carrier, down, monthly, term
+                CrownLogQuoteHistory carrier & IIf(pPlan = "direct", " (direct bill)", ""), pDown, pMonthly, term
 
                 ' And the direct bill (no auto pay) quote, when United gave one.
-                If Len(CrownUnitedDirectDown) > 0 Or Len(CrownUnitedDirectMonthly) > 0 Then
+                If extraDirect And (Len(CrownUnitedDirectDown) > 0 Or Len(CrownUnitedDirectMonthly) > 0) Then
                     If InStr(1, CrownQuoteResult(CLng(ids(i)), _
                             Array("carrier", "state", "down", "monthly", "term", "who", "plan", "due"), _
                             Array(carrier, "quoted", CrownUnitedDirectDown, CrownUnitedDirectMonthly, term, "the quoting tool", "direct", _
@@ -275,7 +299,7 @@ Public Sub CrownRunQuotes()
                         CrownLogQuoteHistory carrier & " (direct bill)", CrownUnitedDirectDown, CrownUnitedDirectMonthly, term
                     End If
                 End If
-                note = Trim$(note & " sent: down " & down & ", monthly " & monthly)
+                note = Trim$(note & " sent" & IIf(pPlan = "direct", " (direct bill only)", "") & ": down " & pDown & ", monthly " & pMonthly)
             Else
                 failed = failed + 1
                 inARow = inARow + 1
