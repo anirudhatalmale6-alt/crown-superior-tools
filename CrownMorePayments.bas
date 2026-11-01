@@ -55,7 +55,7 @@ Public Sub CrownAssurancePaymentDue()
     CrownMoreIndex AA_CARRIER, byNumber, byName
 
     If byNumber.Count = 0 And byName.Count = 0 Then
-        MsgBox "No Assurance America policies came back from the website.", vbExclamation, "Crown Superior"
+        CrownPayBox "No Assurance America policies came back from the website.", vbExclamation, "Crown Superior"
         Exit Sub
     End If
 
@@ -93,7 +93,7 @@ Public Sub CrownAssurancePaymentDue()
     Loop While (Now - started) * 86400 < 60
 
     If answer <> "ready" Then
-        MsgBox "Assurance America did not show its sign-in page. Nothing has been changed.", _
+        CrownPayBox "Assurance America did not show its sign-in page. Nothing has been changed.", _
                vbExclamation, "Crown Superior"
         GoTo Finish
     End If
@@ -115,7 +115,7 @@ Public Sub CrownAssurancePaymentDue()
     Loop While (Now - started) * 86400 < AA_LIST_WAIT_SECONDS
 
     If Len(answer) = 0 Or answer = "none" Then
-        If MsgBox("The Assurance America list of policies has not shown up yet." & vbCrLf & vbCrLf & _
+        If CrownPayBox("The Assurance America list of policies has not shown up yet." & vbCrLf & vbCrLf & _
                   "If it is on the screen now, press OK. Press Cancel to stop.", _
                   vbOKCancel + vbQuestion, "Crown Superior") = vbCancel Then GoTo Finish
 
@@ -131,7 +131,7 @@ Public Sub CrownAssurancePaymentDue()
     End If
 
     If picks.Count = 0 Then
-        MsgBox "No rows with a payment due on the Assurance America list. Nothing has been changed.", _
+        CrownPayBox "No rows with a payment due on the Assurance America list. Nothing has been changed.", _
                vbInformation, "Crown Superior"
         GoTo Finish
     End If
@@ -253,7 +253,7 @@ Finish:
     ThisWorkbook.Save
     ws.Activate
 
-    MsgBox done & " Assurance America policies written to the website." & vbCrLf & _
+    CrownPayBox done & " Assurance America policies written to the website." & vbCrLf & _
            unmatched & " could not be matched to a policy on the website." & vbCrLf & _
            blank & " opened but showed nothing to read - left as they were." & vbCrLf & _
            failed & " did not go through." & vbCrLf & vbCrLf & _
@@ -334,7 +334,7 @@ Public Sub CrownTrexisPaymentDue()
     CrownMoreIndex TX_CARRIER, byNumber, byName
 
     If byNumber.Count = 0 And byName.Count = 0 Then
-        MsgBox "No Trexis policies came back from the website.", vbExclamation, "Crown Superior"
+        CrownPayBox "No Trexis policies came back from the website.", vbExclamation, "Crown Superior"
         Exit Sub
     End If
 
@@ -363,7 +363,7 @@ Public Sub CrownTrexisPaymentDue()
 
     ' --- sign in ---------------------------------------------------------
     If Not CrownMoreWaitJs(drv, "return (document.getElementById('loginName')&&document.getElementById('loginPassword'))?'ok':'';", 60) Then
-        MsgBox "Trexis did not show its sign-in page. Nothing has been changed.", vbExclamation, "Crown Superior"
+        CrownPayBox "Trexis did not show its sign-in page. Nothing has been changed.", vbExclamation, "Crown Superior"
         GoTo Finish
     End If
 
@@ -373,7 +373,7 @@ Public Sub CrownTrexisPaymentDue()
     ClickElement drv, "//*[@id='loginSubmit']/div[1]/button", "XPATH"
 
     If Not CrownMoreWaitJs(drv, "return document.getElementById('agentHomePolicyButton')?'ok':'';", 90) Then
-        MsgBox "Signed in to Trexis, but its home page never came up. Nothing has been changed.", _
+        CrownPayBox "Signed in to Trexis, but its home page never came up. Nothing has been changed.", _
                vbExclamation, "Crown Superior"
         GoTo Finish
     End If
@@ -392,7 +392,7 @@ Public Sub CrownTrexisPaymentDue()
         ' His WaitForPageChange: the policy centre sometimes needs a reload.
         drv.Refresh
         If Not CrownMoreWaitJs(drv, "return document.getElementById('searchPolicyQuote')?'ok':'';", 30) Then
-            MsgBox "Trexis did not open its policy search. Nothing has been changed.", vbExclamation, "Crown Superior"
+            CrownPayBox "Trexis did not open its policy search. Nothing has been changed.", vbExclamation, "Crown Superior"
             GoTo Finish
         End If
     End If
@@ -400,7 +400,7 @@ Public Sub CrownTrexisPaymentDue()
     ClickElement drv, "searchPolicyQuote", "ID"
 
     If Not CrownMoreWaitJs(drv, "return document.getElementById('exportPolicyRecordsToCVS')?'ok':'';", 60) Then
-        MsgBox "Trexis did not show its Export button. Nothing has been changed.", vbExclamation, "Crown Superior"
+        CrownPayBox "Trexis did not show its Export button. Nothing has been changed.", vbExclamation, "Crown Superior"
         GoTo Finish
     End If
 
@@ -410,7 +410,7 @@ Public Sub CrownTrexisPaymentDue()
     csvPath = CrownMoreNewDownload(exportAt, 90)
 
     If Len(csvPath) = 0 Then
-        MsgBox "Trexis's export file never arrived in Downloads. Nothing has been changed.", _
+        CrownPayBox "Trexis's export file never arrived in Downloads. Nothing has been changed.", _
                vbExclamation, "Crown Superior"
         GoTo Finish
     End If
@@ -418,7 +418,7 @@ Public Sub CrownTrexisPaymentDue()
     lines = Split(Replace(CrownMoreReadText(csvPath), vbCrLf, vbLf), vbLf)
 
     If UBound(lines) < 1 Then
-        MsgBox "Trexis's export file was empty. Nothing has been changed.", vbExclamation, "Crown Superior"
+        CrownPayBox "Trexis's export file was empty. Nothing has been changed.", vbExclamation, "Crown Superior"
         GoTo Finish
     End If
 
@@ -430,7 +430,7 @@ Public Sub CrownTrexisPaymentDue()
     cAmount = CrownMoreColumn(head, "Amount Due")
 
     If cPol < 0 Or cStatus < 0 Or cAmount < 0 Then
-        MsgBox "Trexis's export file did not have the columns expected (Policy Number, Status, Amount Due)." & _
+        CrownPayBox "Trexis's export file did not have the columns expected (Policy Number, Status, Amount Due)." & _
                vbCrLf & vbCrLf & "It is " & csvPath & " - please send it to me.", vbExclamation, "Crown Superior"
         GoTo Finish
     End If
@@ -516,7 +516,7 @@ Finish:
     ThisWorkbook.Save
     ws.Activate
 
-    MsgBox done & " Trexis policies written to the website." & vbCrLf & _
+    CrownPayBox done & " Trexis policies written to the website." & vbCrLf & _
            unmatched & " could not be matched to a policy on the website." & vbCrLf & _
            failed & " did not go through." & vbCrLf & vbCrLf & _
            "The TrexisPayments sheet has every one, and how it was matched.", _
@@ -929,14 +929,14 @@ Private Function CrownCodeWait(ByVal drv As ChromeDriver, ByVal carrier As Strin
         answer = CrownMoreJs(drv, CrownCodePageJs())
 
         If answer = "choose" Then
-            how = MsgBox(carrier & " wants to send you a verification code." & vbCrLf & vbCrLf & _
+            how = CrownPayBox(carrier & " wants to send you a verification code." & vbCrLf & vbCrLf & _
                          "Yes = send it by TEXT message" & vbCrLf & _
                          "No = send it by EMAIL" & vbCrLf & _
                          "Cancel = stop the run", vbYesNoCancel + vbQuestion, "Crown Superior")
             If how = vbCancel Then Exit Function
 
             If CrownMoreJs(drv, CrownCodeChooseJs(), IIf(how = vbYes, "text", "email")) <> "ok" Then
-                MsgBox "Please click how you want the code sent in the " & carrier & " window, then press OK here.", _
+                CrownPayBox "Please click how you want the code sent in the " & carrier & " window, then press OK here.", _
                        vbInformation, "Crown Superior"
             End If
 
@@ -947,13 +947,13 @@ Private Function CrownCodeWait(ByVal drv As ChromeDriver, ByVal carrier As Strin
             tries = tries + 1
 
             If tries > 3 Then
-                MsgBox carrier & " did not take the code three times, so the run has stopped." & vbCrLf & _
+                CrownPayBox carrier & " did not take the code three times, so the run has stopped." & vbCrLf & _
                        "Nothing has been changed on the website.", vbExclamation, "Crown Superior"
                 Exit Function
             End If
 
             hint = Left$(Mid$(answer, 6), 200)
-            typed = Trim$(InputBox(carrier & " has sent you a verification code." & vbCrLf & hint & vbCrLf & vbCrLf & _
+            typed = Trim$(CrownPayInput(carrier & " has sent you a verification code." & vbCrLf & hint & vbCrLf & vbCrLf & _
                                    IIf(tries > 1, "That code was not accepted - check it and type it again." & vbCrLf & vbCrLf, "") & _
                                    "Type the code here and press OK (Cancel stops the run):", _
                                    "Crown Superior - " & carrier & " code"))
@@ -1131,7 +1131,7 @@ Private Sub CrownCodeDone(ByVal ws As Object, ByVal carrier As String, ByVal she
     ThisWorkbook.Save
     ws.Activate
 
-    MsgBox done & " " & carrier & " policies written to the website." & vbCrLf & _
+    CrownPayBox done & " " & carrier & " policies written to the website." & vbCrLf & _
            unmatched & " could not be matched to a policy on the website." & vbCrLf & _
            blank & " showed no amount or date - left as they were." & vbCrLf & _
            failed & " did not go through." & vbCrLf & vbCrLf & _
@@ -1163,7 +1163,7 @@ Public Sub CrownProgressivePaymentDue()
     CrownMoreIndex PG_CARRIER, byNumber, byName
 
     If byNumber.Count = 0 And byName.Count = 0 Then
-        MsgBox "No Progressive policies came back from the website.", vbExclamation, "Crown Superior"
+        CrownPayBox "No Progressive policies came back from the website.", vbExclamation, "Crown Superior"
         Exit Sub
     End If
 
@@ -1176,7 +1176,7 @@ Public Sub CrownProgressivePaymentDue()
     If Not CrownPgSignIn(drv) Then GoTo Finish
 
     If Not CrownPgSearch(drv) Then
-        MsgBox "Progressive's list of active policies did not come up, so nothing has been changed.", _
+        CrownPayBox "Progressive's list of active policies did not come up, so nothing has been changed.", _
                vbExclamation, "Crown Superior"
         GoTo Finish
     End If
@@ -1205,7 +1205,7 @@ Public Sub CrownProgressivePaymentDue()
     Loop While pageNo < 200
 
     If people.Count = 0 Then
-        MsgBox "Progressive's active policy list came up empty, so nothing has been changed.", vbInformation, "Crown Superior"
+        CrownPayBox "Progressive's active policy list came up empty, so nothing has been changed.", vbInformation, "Crown Superior"
         GoTo Finish
     End If
 
@@ -1343,7 +1343,7 @@ Public Function CrownPgSignIn(ByVal drv As ChromeDriver) As Boolean
     End If
 
     If Not CrownCodeWait(drv, PG_CARRIER, "return document.getElementById('sbp-search')?'ok':'';", 180) Then
-        MsgBox "Did not get to Progressive's policy search, so nothing has been changed." & vbCrLf & _
+        CrownPayBox "Did not get to Progressive's policy search, so nothing has been changed." & vbCrLf & _
                "(If Progressive asked for something other than a code, tell me what it showed.)", _
                vbExclamation, "Crown Superior"
         Exit Function
@@ -1471,7 +1471,7 @@ Public Sub CrownFirstAcceptancePaymentDue()
     CrownMoreIndex FA_CARRIER, byNumber, byName
 
     If byNumber.Count = 0 And byName.Count = 0 Then
-        MsgBox "No First Acceptance policies came back from the website.", vbExclamation, "Crown Superior"
+        CrownPayBox "No First Acceptance policies came back from the website.", vbExclamation, "Crown Superior"
         Exit Sub
     End If
 
@@ -1488,7 +1488,7 @@ Public Sub CrownFirstAcceptancePaymentDue()
     ' The tile is on the page or in one of its frames (his macro assumed
     ' frame 0) - go to wherever it is.
     If Not CrownFaFindFrame(drv, "//div[contains(@class, 'aspect-square') and contains(., 'Policy Services')]", 60) Then
-        MsgBox "First Acceptance's Policy Services tile did not show up, so nothing has been changed.", _
+        CrownPayBox "First Acceptance's Policy Services tile did not show up, so nothing has been changed.", _
                vbExclamation, "Crown Superior"
         GoTo Finish
     End If
@@ -1501,7 +1501,7 @@ Public Sub CrownFirstAcceptancePaymentDue()
     rowsXp = "//div[@data-component='x-policy-search-dialog']//table/tbody/tr"
 
     If Not CrownFaWaitX(drv, rowsXp & "[1]/td[2]//button", 60) Then
-        MsgBox "First Acceptance's policy search list did not come up, so nothing has been changed.", _
+        CrownPayBox "First Acceptance's policy search list did not come up, so nothing has been changed.", _
                vbExclamation, "Crown Superior"
         GoTo Finish
     End If
@@ -1602,7 +1602,7 @@ Public Function CrownFaSignIn(ByVal drv As ChromeDriver) As Boolean
             "if(hub(document))return 'ok';var fs=document.querySelectorAll('iframe');" & _
             "for(var k=0;k<fs.length;k++){try{if(hub(fs[k].contentDocument))return 'ok';}catch(e){}}" & _
             "return (fs.length&&/apps\/portal/i.test(location.href)&&!/verification|one-time|passcode|security code/i.test(document.body.innerText))?'ok':'';", 180) Then
-        MsgBox "Did not get past First Acceptance's sign-in, so nothing has been changed." & vbCrLf & _
+        CrownPayBox "Did not get past First Acceptance's sign-in, so nothing has been changed." & vbCrLf & _
                "(If it asked for something other than a code, send me a screenshot of it.)", _
                vbExclamation, "Crown Superior"
         Exit Function
@@ -1639,7 +1639,7 @@ Public Sub CrownAssuranceLook()
     If CrownCodeWait(drv, AA_CARRIER, "return document.querySelector(""input[formcontrolname='password']"")?'':'ok';", 120) Then
         CrownLookPages drv, AA_CARRIER
     Else
-        MsgBox "Did not get past Assurance America's sign-in. Send me a screenshot of what it shows.", vbExclamation, "Crown Superior"
+        CrownPayBox "Did not get past Assurance America's sign-in. Send me a screenshot of what it shows.", vbExclamation, "Crown Superior"
     End If
 
     On Error Resume Next
@@ -1668,7 +1668,7 @@ Public Sub CrownTrexisLook()
     If CrownCodeWait(drv, TX_CARRIER, "return document.getElementById('agentHomePolicyButton')?'ok':'';", 120) Then
         CrownLookPages drv, TX_CARRIER
     Else
-        MsgBox "Did not get past Trexis's sign-in. Send me a screenshot of what it shows.", vbExclamation, "Crown Superior"
+        CrownPayBox "Did not get past Trexis's sign-in. Send me a screenshot of what it shows.", vbExclamation, "Crown Superior"
     End If
 
     On Error Resume Next
@@ -1841,7 +1841,7 @@ Private Function CrownNgSignIn(ByVal drv As ChromeDriver) As Boolean
         ClickElement drv, "//button[contains(text(),'SIGN IN')]", "XPATH"
         drv.Wait 2500
     ElseIf answer = "" Then
-        MsgBox "Please sign in to National General in the Chrome window, then press OK here.", _
+        CrownPayBox "Please sign in to National General in the Chrome window, then press OK here.", _
                vbInformation, "Crown Superior"
     End If
 
@@ -1850,7 +1850,7 @@ Private Function CrownNgSignIn(ByVal drv As ChromeDriver) As Boolean
         "&&!document.getElementById('txtUserID'))?'ok':'';", 180)
 
     If Not CrownNgSignIn Then
-        MsgBox "Did not get past National General's sign-in. Send me a screenshot of what it shows.", _
+        CrownPayBox "Did not get past National General's sign-in. Send me a screenshot of what it shows.", _
                vbExclamation, "Crown Superior"
     End If
 End Function
@@ -1876,7 +1876,7 @@ Public Sub CrownNatGenPaymentDue()
     Set policies = CrownPolicyRows(NG_CARRIER)
 
     If policies.Count = 0 Then
-        MsgBox "No National General policies came back from the website.", vbExclamation, "Crown Superior"
+        CrownPayBox "No National General policies came back from the website.", vbExclamation, "Crown Superior"
         Exit Sub
     End If
 
@@ -1988,7 +1988,7 @@ Finish:
     ThisWorkbook.Save
     ws.Activate
 
-    MsgBox done & " National General policies written to the website." & vbCrLf & _
+    CrownPayBox done & " National General policies written to the website." & vbCrLf & _
            skipped & " skipped - cancelled more than 60 days ago." & vbCrLf & _
            notFound & " not found on National General." & vbCrLf & _
            blank & " showed nothing to read - left as they were." & vbCrLf & _
@@ -2134,7 +2134,7 @@ Private Sub CrownLookPages(ByVal drv As ChromeDriver, ByVal carrier As String)
     On Error GoTo 0
 
     Do
-        If MsgBox("Signed in to " & carrier & "." & vbCrLf & vbCrLf & _
+        If CrownPayBox("Signed in to " & carrier & "." & vbCrLf & vbCrLf & _
                   "In the Chrome window, open each page I asked for, then press OK here to save it" & vbCrLf & _
                   "(one customer's policy pages: drivers, vehicles, coverages / deductibles," & vbCrLf & _
                   "lienholder, and the page with the amount due and due date)." & vbCrLf & vbCrLf & _
@@ -2156,7 +2156,7 @@ Private Sub CrownLookPages(ByVal drv As ChromeDriver, ByVal carrier As String)
 
     If k > 0 Then
         Shell "explorer.exe """ & folder & """", vbNormalFocus
-        MsgBox k & " page(s) saved in:" & vbCrLf & folder & vbCrLf & vbCrLf & _
+        CrownPayBox k & " page(s) saved in:" & vbCrLf & folder & vbCrLf & vbCrLf & _
                "Please zip that folder (right-click > Send to > Compressed folder) and send it to me in our chat.", _
                vbInformation, "Crown Superior"
     End If

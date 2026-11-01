@@ -94,12 +94,17 @@ End Sub
 
 
 ' Opening the workbook: back on by itself if it was on when last saved.
+' The payment reports' timer (CrownPaySchedule) is booked again here too.
 Public Sub Auto_Open()
     If CrownAutoRemembered() Then
         On Error Resume Next
         Application.OnTime Now + TimeSerial(0, 0, 30), "CrownAutoResume"
         On Error GoTo 0
     End If
+
+    On Error Resume Next
+    Application.OnTime Now + TimeSerial(0, 0, 40), "CrownPayResume"
+    On Error GoTo 0
 End Sub
 
 

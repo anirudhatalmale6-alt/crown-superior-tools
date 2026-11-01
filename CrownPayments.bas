@@ -113,14 +113,14 @@ Public Function CrownPolicyRows(Optional ByVal carrier As String = "") As Collec
     csv = CrownPost(body)
 
     If Len(csv) = 0 Then
-        MsgBox "The website did not answer. Check your internet, then run CrownTestConnection.", _
+        CrownPayBox "The website did not answer. Check your internet, then run CrownTestConnection.", _
                vbExclamation, "Crown Superior"
         Set CrownPolicyRows = rows
         Exit Function
     End If
 
     If Left$(csv, 5) = "error" Then
-        MsgBox "The website answered: " & csv, vbExclamation, "Crown Superior"
+        CrownPayBox "The website answered: " & csv, vbExclamation, "Crown Superior"
         Set CrownPolicyRows = rows
         Exit Function
     End If
@@ -163,7 +163,7 @@ Public Sub CrownVersion()
                    "pick the new one. Importing on top of it does not replace it."
     End If
 
-    MsgBox "CrownPayments is " & CROWN_PAYMENTS_VERSION & vbCrLf & vbCrLf & _
+    CrownPayBox "CrownPayments is " & CROWN_PAYMENTS_VERSION & vbCrLf & vbCrLf & _
            "CrownAPI is " & apiStamp, vbInformation, "Crown Superior"
 End Sub
 
@@ -259,7 +259,7 @@ Public Sub CrownUploadPaymentsDue()
     On Error GoTo 0
 
     If wsUpload Is Nothing Then
-        MsgBox "There is no UploadPaymentdue sheet in this workbook.", vbExclamation, "Crown Superior"
+        CrownPayBox "There is no UploadPaymentdue sheet in this workbook.", vbExclamation, "Crown Superior"
         Exit Sub
     End If
 
@@ -409,7 +409,7 @@ Public Sub CrownUploadPaymentsDue()
     wsLog.Columns("A:K").AutoFit
     wsLog.Activate
 
-    MsgBox done & " policy record(s) updated on the website." & vbCrLf & _
+    CrownPayBox done & " policy record(s) updated on the website." & vbCrLf & _
            missing & " could not be matched to a policy there." & vbCrLf & _
            refused & " were refused or did not go through." & vbCrLf & vbCrLf & _
            "The CrownUploadLog sheet says what happened to every row, and how each " & _
@@ -1055,7 +1055,7 @@ Public Sub CrownUaigPaymentDue()
     Set policies = CrownPolicyRows("United Auto")
 
     If policies.Count = 0 Then
-        MsgBox "No United Auto policies came back from the website.", vbExclamation, "Crown Superior"
+        CrownPayBox "No United Auto policies came back from the website.", vbExclamation, "Crown Superior"
         Exit Sub
     End If
 
@@ -1178,7 +1178,7 @@ Public Sub CrownUaigPaymentDue()
             ' Three in a row means we are stuck on something, and another
             ' hundred of these would just be the same screen read again.
             If lost >= 3 Then
-                MsgBox "United stopped answering after " & (i - 1) & " policies." & vbCrLf & vbCrLf & _
+                CrownPayBox "United stopped answering after " & (i - 1) & " policies." & vbCrLf & vbCrLf & _
                        "Nothing has been written from the screen it is stuck on. " & _
                        "Close the browser, look at what is on it, and run this again.", _
                        vbExclamation, "Crown Superior"
@@ -1437,7 +1437,7 @@ NextPolicy:
 
     ws.Activate
 
-    MsgBox policies.Count & " United Auto policies on the website." & vbCrLf & _
+    CrownPayBox policies.Count & " United Auto policies on the website." & vbCrLf & _
            skipped & " cancelled more than " & CANCELLED_LONG_ENOUGH & " days ago and passed over." & vbCrLf & _
            done & " written back to the website." & vbCrLf & _
            blank & " had nothing to read and were left as they were." & vbCrLf & _
@@ -1475,7 +1475,7 @@ Private Function CrownMakeRenewals(ByVal renewals As Collection, ByVal ws As Obj
         listing = listing & vbCrLf
     Next i
 
-    If MsgBox(renewals.Count & " of these policies have been renewed at United under a new " & _
+    If CrownPayBox(renewals.Count & " of these policies have been renewed at United under a new " & _
               "number that is not on our website:" & vbCrLf & vbCrLf & listing & vbCrLf & _
               "Add each one as a new policy, copied from the one we hold, with the new " & _
               "number and dates and ""Renewal"" as the description?", _
@@ -2245,13 +2245,13 @@ Public Sub CrownVervePaymentDue()
     Set policies = CrownPolicyRows("Verve")
 
     If policies.Count = 0 Then
-        MsgBox "No Trisura (Verve) policies came back from the website.", vbExclamation, "Crown Superior"
+        CrownPayBox "No Trisura (Verve) policies came back from the website.", vbExclamation, "Crown Superior"
         Exit Sub
     End If
 
-    If MsgBox(policies.Count & " Trisura (Verve) policies to look up, about " & _
+    If CrownPayBox(policies.Count & " Trisura (Verve) policies to look up, about " & _
               Int(policies.Count / 8) + 1 & " minutes." & vbCrLf & vbCrLf & _
-              "Carry on?", vbYesNo + vbQuestion, "Crown Superior") <> vbYes Then
+              "Carry on?", vbYesNo + vbQuestion, "Crown Superior", vbYes) <> vbYes Then
         Exit Sub
     End If
 
@@ -2285,7 +2285,7 @@ Public Sub CrownVervePaymentDue()
     drv.Get wsInput.Range("URL_9").value
 
     If Not CrownWaitFor(drv, By, "ID", "LoginControl_LoginNameTextBox", 40) Then
-        MsgBox "Verve did not show its sign-in page. Nothing has been changed.", _
+        CrownPayBox "Verve did not show its sign-in page. Nothing has been changed.", _
                vbExclamation, "Crown Superior"
         Exit Sub
     End If
@@ -2304,7 +2304,7 @@ Public Sub CrownVervePaymentDue()
     ' in, which is what lets this ask for one policy after another
     ' without navigating back to anything.
     If Not CrownWaitFor(drv, By, "ID", VERVE_LOOKUP_BOX, 60) Then
-        MsgBox "Signed in, but the quick policy lookup never appeared. " & _
+        CrownPayBox "Signed in, but the quick policy lookup never appeared. " & _
                "Nothing has been changed.", vbExclamation, "Crown Superior"
         Exit Sub
     End If
@@ -2717,7 +2717,7 @@ NextVerve:
 
     ws.Activate
 
-    MsgBox policies.Count & " Trisura (Verve) policies on the website." & vbCrLf & _
+    CrownPayBox policies.Count & " Trisura (Verve) policies on the website." & vbCrLf & _
            skipped & " cancelled more than " & CANCELLED_LONG_ENOUGH & " days ago and passed over." & vbCrLf & _
            badNumber & " had something in the policy number box that is not a policy number." & vbCrLf & _
            done & " written back to the website." & vbCrLf & _
