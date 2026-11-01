@@ -38,26 +38,6 @@ Public CrownAutoOn As Boolean
 ' The switch as kept in the workbook - survives Reset and reopening.
 Private Const AUTO_NAME As String = "CrownAutoQuoting"
 
-' 1 Nov (Tony: "out of nowhere tool starts again ... im not going to
-' remember to keep running a macro when using computer as im using it a
-' lot"): a run only STARTS once nobody has touched the keyboard or mouse
-' for this long. While someone is working it looks again every minute.
-Private Const AUTO_IDLE_SECONDS As Long = 180
-Private CrownAutoWaitNoted As Boolean
-
-Private Type CROWN_LASTINPUT
-    cbSize As Long
-    dwTime As Long
-End Type
-
-#If VBA7 Then
-Private Declare PtrSafe Function GetLastInputInfo Lib "user32" (ByRef plii As CROWN_LASTINPUT) As Long
-Private Declare PtrSafe Function GetTickCount Lib "kernel32" () As Long
-#Else
-Private Declare Function GetLastInputInfo Lib "user32" (ByRef plii As CROWN_LASTINPUT) As Long
-Private Declare Function GetTickCount Lib "kernel32" () As Long
-#End If
-
 
 Public Sub CrownStartAutoQuoting()
     If CrownAutoOn Then
@@ -149,19 +129,6 @@ Public Sub CrownAutoTick(Optional ByVal chain As String = "")
         CrownAutoOn = True
     End If
 
-    ' Somebody is using the PC: no Chrome taking over the screen now.
-    If CrownAutoIdleSeconds() < AUTO_IDLE_SECONDS Then
-        If Not CrownAutoWaitNoted Then
-            CrownAutoNote "waiting - the computer is in use; quoting starts once the keyboard and mouse " & _
-                          "have been left alone for " & (AUTO_IDLE_SECONDS \ 60) & " minutes"
-            CrownAutoWaitNoted = True
-        End If
-
-        CrownAutoSchedule 1
-        Exit Sub
-    End If
-
-    CrownAutoWaitNoted = False
     CrownAutoMode = True
 
     On Error Resume Next
@@ -177,26 +144,6 @@ Public Sub CrownAutoTick(Optional ByVal chain As String = "")
     ' can never have a second run start on top of it.
     If CrownAutoOn Then CrownAutoSchedule AUTO_EVERY_MINUTES
 End Sub
-
-
-' Seconds since the keyboard or mouse was last touched (Windows' own count).
-' A large number when it cannot be told, so quoting is never blocked by it.
-Private Function CrownAutoIdleSeconds() As Double
-    Dim info As CROWN_LASTINPUT
-    Dim diff As Double
-
-    CrownAutoIdleSeconds = 1000000#
-
-    On Error Resume Next
-    info.cbSize = Len(info)
-    If GetLastInputInfo(info) = 0 Then Exit Function
-
-    ' Both counters wrap after 49 days and are read here as signed numbers.
-    diff = CDbl(GetTickCount()) - CDbl(info.dwTime)
-    If diff < 0 Then diff = diff + 4294967296#
-
-    CrownAutoIdleSeconds = diff / 1000#
-End Function
 
 
 Private Sub CrownAutoSchedule(ByVal minutes As Long)
