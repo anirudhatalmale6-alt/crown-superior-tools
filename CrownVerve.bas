@@ -208,12 +208,16 @@ Private Function CrownVerveItemJs() As String
         "return 'clicked '+it.innerText.trim();"
 End Function
 
-' Once: the Verve button on the sheets becomes "Verve (Trisura)" and a
-' "Verve (Benchmark)" button is added beside it. Run it again any time -
-' it does nothing when the Benchmark button is already there.
+' The Verve RUN button on the sheets (macro FillVerve) becomes two buttons
+' side by side in the same place: "Verve (Trisura)" and "Verve (Benchmark)".
+' Safe to run again - it says what it found either way (2 Nov: the first
+' version gave him nothing to go on).
 Public Sub CrownMakeVerveButtons()
-    Dim ws As Worksheet, shp As Shape, copy As Shape
-    Dim act As String, made As Long, renamed As Long
+    Dim ws As Worksheet, shp As Shape, nb As Shape
+    Dim act As String, found As String, done As Long, already As Long
+    Dim targets As Collection, t As Variant, w As Double
+
+    Set targets = New Collection
 
     For Each ws In ThisWorkbook.Worksheets
         For Each shp In ws.Shapes
@@ -222,25 +226,56 @@ Public Sub CrownMakeVerveButtons()
             act = shp.OnAction
             On Error GoTo 0
 
-            If LCase$(act) Like "*!fillverve" Or LCase$(act) = "fillverve" Then
-                shp.OnAction = "FillVerveTrisura"
-                CrownSetShapeText shp, "Verve (Trisura)"
-                renamed = renamed + 1
+            If InStr(1, act, "fillverve", vbTextCompare) > 0 Then
+                found = found & "   " & ws.Name & ": '" & shp.Name & "' runs " & Mid$(act, InStrRev(act, "!") + 1) & vbCrLf
 
-                Set copy = shp.Duplicate
-                copy.Top = shp.Top
-                copy.Left = shp.Left + shp.Width + 6
-                copy.OnAction = "FillVerveBenchmark"
-                CrownSetShapeText copy, "Verve (Benchmark)"
-                made = made + 1
+                If InStr(1, act, "FillVerveBenchmark", vbTextCompare) > 0 Then already = already + 1
+                If LCase$(Mid$(act, InStrRev(act, "!") + 1)) = "fillverve" Then targets.Add shp
             End If
         Next shp
     Next ws
 
-    MsgBox IIf(renamed = 0, "No button running FillVerve was found - nothing changed." & vbCrLf & _
-               "The macros are there anyway: FillVerveTrisura and FillVerveBenchmark.", _
-               renamed & " Verve button(s) now say Verve (Trisura), and " & made & " Verve (Benchmark) button(s) were added beside them." & vbCrLf & _
-               "Save the workbook (Ctrl+S) to keep them."), vbInformation, "Crown Superior"
+    For Each t In targets
+        Set shp = t
+        w = shp.Width
+
+        On Error Resume Next
+        Err.Clear
+        Set nb = shp.Duplicate
+        If Err.Number <> 0 Or nb Is Nothing Then
+            found = found & "   could not copy '" & shp.Name & "': " & Err.Description & vbCrLf
+            Err.Clear
+            On Error GoTo 0
+        Else
+            On Error GoTo 0
+            ' Two halves of the old button, in its place.
+            shp.Width = w / 2 - 1
+            shp.OnAction = "FillVerveTrisura"
+            CrownSetShapeText shp, "Verve (Trisura)"
+
+            nb.Top = shp.Top
+            nb.Height = shp.Height
+            nb.Width = w / 2 - 1
+            nb.Left = shp.Left + w / 2 + 1
+            nb.OnAction = "FillVerveBenchmark"
+            nb.Name = "CrownVerveBenchmark"
+            CrownSetShapeText nb, "Verve (Benchmark)"
+            done = done + 1
+        End If
+    Next t
+
+    If done > 0 Then
+        MsgBox "Done: the Verve RUN button is now two buttons side by side - Verve (Trisura) and Verve (Benchmark)." & vbCrLf & vbCrLf & _
+               "Press Ctrl+S to keep them.", vbInformation, "Crown Superior"
+    ElseIf already > 0 Then
+        MsgBox "The Verve (Benchmark) button is already there:" & vbCrLf & found, vbInformation, "Crown Superior"
+    ElseIf Len(found) > 0 Then
+        MsgBox "Found these but changed nothing:" & vbCrLf & found & vbCrLf & _
+               "Run FillVerveTrisura / FillVerveBenchmark from Alt+F8 for now, and send me a screenshot of this box.", vbExclamation, "Crown Superior"
+    Else
+        MsgBox "No button on any sheet runs FillVerve, so nothing was changed." & vbCrLf & _
+               "Run FillVerveTrisura / FillVerveBenchmark from Alt+F8 for now, and tell me which sheet the Verve button is on.", vbExclamation, "Crown Superior"
+    End If
 End Sub
 
 Private Sub CrownSetShapeText(ByVal shp As Shape, ByVal text As String)
@@ -250,6 +285,9 @@ Private Sub CrownSetShapeText(ByVal shp As Shape, ByVal text As String)
         Err.Clear
         shp.TextFrame.Characters.text = text
     End If
+    ' Two words in half a button: smaller, and allowed to wrap.
+    shp.TextFrame2.WordWrap = msoTrue
+    If shp.TextFrame2.TextRange.Font.Size > 9 Then shp.TextFrame2.TextRange.Font.Size = 9
     On Error GoTo 0
 End Sub
 
