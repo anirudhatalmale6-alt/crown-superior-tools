@@ -478,9 +478,12 @@ Public Function CrownVervePastFirstPage(ByVal drv As Object) As Boolean
         On Error Resume Next
         answer = ""
         answer = drv.ExecuteScript( _
-            "if(!document.getElementById('QACMainDiv'))return 'gone';" & _
             "var b=document.querySelectorAll('[id$=""NewClientButton_CD""],[id$=""NewClientButton""]');" & _
             "for(var i=0;i<b.length;i++){if(b[i].getClientRects().length)return 'new:'+b[i].id;}" & _
+            "var nb=[].slice.call(document.querySelectorAll('input[type=button],input[type=submit],button,a,div,span,td')).filter(function(x){" & _
+            "return x.getClientRects().length&&((x.value||'')+' '+(x.innerText||'')).replace(/\s+/g,' ').trim().toLowerCase()==='new client'&&!x.querySelector('input,button')&&x.closest('#QACMainDiv,[id*=Pop],[class*=opup],[role=dialog]');})[0];" & _
+            "if(nb){setTimeout(function(){nb.click();},50);return 'newtext';}" & _
+            "if(!document.getElementById('QACMainDiv'))return 'gone';" & _
             "var e=document.querySelectorAll('.ErrorMessage'),t=[];" & _
             "for(var j=0;j<e.length;j++){if(e[j].getClientRects().length){" & _
             "var s=(e[j].innerText||'').replace(/\s+/g,' ').trim();if(s)t.push(s);}}" & _
@@ -496,7 +499,7 @@ Public Function CrownVervePastFirstPage(ByVal drv As Object) As Boolean
             Exit Function
         End If
 
-        If Left$(answer, 4) = "new:" Then
+        If Left$(answer, 4) = "new:" Or answer = "newtext" Then
             clicks = clicks + 1
 
             If clicks > 3 Then
@@ -508,10 +511,13 @@ Public Function CrownVervePastFirstPage(ByVal drv As Object) As Boolean
 
             CrownNoteBlocker "Verve: existing-client pop-up - pressed New Client"
 
-            On Error Resume Next
-            drv.FindElementById(Mid$(answer, 5)).Click
-            Err.Clear
-            On Error GoTo 0
+            ' "newtext": the button was found by its words and already clicked (2 Nov).
+            If answer <> "newtext" Then
+                On Error Resume Next
+                drv.FindElementById(Mid$(answer, 5)).Click
+                Err.Clear
+                On Error GoTo 0
+            End If
 
             drv.Wait 2500
         ElseIf Left$(answer, 6) = "error:" Then
