@@ -463,7 +463,7 @@ Private Sub CrownPullApply(ByVal answer As String, ByVal policyNo As String, ByV
     Dim vNames As Collection, vn As Variant, w() As String
     Dim keepRow As Variant, failed As String
     Dim bills As Collection, uws As Collection, firstPay As Variant, firstInst As Variant
-    Dim adminNow As String, adminAdd As String, uwLine As String
+    Dim adminNow As String, adminAdd As String, uwLine As String, guardNote As String
 
     Set wsEdit = ThisWorkbook.Worksheets("Edit Data")
     keepRow = wsEdit.Range("C5").value
@@ -503,6 +503,21 @@ Private Sub CrownPullApply(ByVal answer As String, ByVal policyNo As String, ByV
         End Select
     Next k
 
+    ' --- only blank what is missing when the page was read in full ------------
+    ' 2 Nov: a pull whose page came back without the policy number, phone,
+    ' email and vehicle emptied all of those on Edit Data (Shuntricia Cooper).
+    ' Missing because the page was not read is not the same as United not
+    ' having it - so with any of the basics missing, nothing is blanked.
+    If mPullClear Then
+        If Len(Trim$(CStr(insured(6)))) = 0 Or drivers.Count = 0 Or vehicles.Count = 0 Then
+            mPullClear = False
+            guardNote = carrier & "'s page did not show " & _
+                      IIf(Len(Trim$(CStr(insured(6)))) = 0, "the policy number ", "") & _
+                      IIf(drivers.Count = 0, "the drivers ", "") & IIf(vehicles.Count = 0, "the vehicles ", "") & _
+                      "- so nothing has been blanked; only what it did show is filled in"
+        End If
+    End If
+
     ' --- the right customer? ---------------------------------------------------
     ' 26 Oct: Edit Data had Alice Stellar open and Jasmine Hodges's policy was
     ' pulled - her drivers went onto Alice's row. Edit Data always opens on
@@ -533,6 +548,7 @@ Private Sub CrownPullApply(ByVal answer As String, ByVal policyNo As String, ByV
     ' --- compare with Edit Data ----------------------------------------------
     Set changes = New Collection
     Set notes = New Collection
+    If Len(guardNote) > 0 Then notes.Add guardNote
     dCols = Array("D", "F", "H", "J")
     vCols = Array("P", "R", "T", "V")
 
