@@ -25,6 +25,8 @@ Private Const MOST_LINES As Long = 1500
 
 ' True while a pull is filling a NEW Edit Data row (compare against nothing).
 Private mPullBlank As Boolean
+' United (2 Nov, Tony): what the carrier does not show is made blank, not left as it was.
+Private mPullClear As Boolean
 
 Public Sub CrownRecordPolicyPages()
     Dim policyNo As String
@@ -466,6 +468,10 @@ Private Sub CrownPullApply(ByVal answer As String, ByVal policyNo As String, ByV
     Set wsEdit = ThisWorkbook.Worksheets("Edit Data")
     keepRow = wsEdit.Range("C5").value
     mPullBlank = newRow
+    ' Tony, 2 Nov: "the information not available should be made blank ... for
+    ' United it will delete what's there and leave blank". United only: the
+    ' Progressive page does not show gender, marital status or licence at all.
+    mPullClear = (carrier = "United")
     Set vNames = New Collection
     Set bills = New Collection
     Set uws = New Collection
@@ -582,7 +588,16 @@ Private Sub CrownPullApply(ByVal answer As String, ByVal policyNo As String, ByV
 
     For k = drivers.Count + 1 To 4
         If k >= 2 Then
-            If UCase$(Trim$(wsEdit.Range(dCols(k - 1) & "16").Text)) = "YES" Then
+            If mPullClear Then
+                ' A driver United does not have: off Edit Data.
+                col = dCols(k - 1)
+                If UCase$(Trim$(wsEdit.Range(col & "16").Text)) = "YES" Then CrownPullAdd changes, wsEdit, col & "16", "Driver " & k & " - is there a driver", "No"
+                For Each item In Array(Array("17", "excluded"), Array("18", "first name"), Array("19", "last name"), Array("20", "gender"), _
+                                       Array("21", "marital status"), Array("22", "date of birth"), Array("23", "relation to driver 1"), _
+                                       Array("24", "license no"), Array("27", "license state"))
+                    CrownPullAdd changes, wsEdit, col & item(0), "Driver " & k & " - " & item(1), ""
+                Next item
+            ElseIf UCase$(Trim$(wsEdit.Range(dCols(k - 1) & "16").Text)) = "YES" Then
                 notes.Add "Edit Data has driver " & k & " (" & Trim$(wsEdit.Range(dCols(k - 1) & "18").Text & " " & wsEdit.Range(dCols(k - 1) & "19").Text) & _
                           ") that " & carrier & " does not - left as it is"
             End If
@@ -631,6 +646,26 @@ Private Sub CrownPullApply(ByVal answer As String, ByVal policyNo As String, ByV
         End If
     Next k
 
+    If mPullClear Then
+        For k = 1 To 4
+            col = vCols(k - 1)
+
+            If k > vehicles.Count Then
+                ' A vehicle United does not have: off Edit Data.
+                If k > 1 And UCase$(Trim$(wsEdit.Range(col & "16").Text)) = "YES" Then CrownPullAdd changes, wsEdit, col & "16", "Vehicle " & k & " - is there a vehicle", "No"
+                For Each item In Array(Array("17", "VIN"), Array("18", "make"), Array("19", "year"), Array("20", "model"), Array("23", "deductible"))
+                    CrownPullAdd changes, wsEdit, col & item(0), "Vehicle " & k & " - " & item(1), ""
+                Next item
+            End If
+
+            ' No lienholder at United for this vehicle: none on Edit Data.
+            If k > liens.Count Then
+                CrownPullAdd changes, wsEdit, col & "30", "Vehicle " & k & " - lien holder", ""
+                If k <= 2 Then CrownPullAdd changes, wsEdit, col & "31", "Vehicle " & k & " - lien holder detail", ""
+            End If
+        Next k
+    End If
+
     If liens.Count > 0 And vehicles.Count > 1 Then
         notes.Add carrier & " lists lienholders without saying which vehicle each is for - they were matched in order, check them"
     End If
@@ -647,18 +682,29 @@ Private Sub CrownPullApply(ByVal answer As String, ByVal policyNo As String, ByV
     Next item
 
     If Not IsEmpty(firstPay) Then
+        CrownPullAdd changes, wsEdit, "N8", "Amount (first payment)", Format$(-Val(firstPay(4)), "0.00")
         CrownPullAdd changes, wsEdit, "O8", "Amount to Co (first payment)", Format$(-Val(firstPay(4)), "0.00")
         CrownPullAdd changes, wsEdit, "P8", "Amount Paid (first payment)", Format$(-Val(firstPay(4)), "0.00")
         CrownPullAdd changes, wsEdit, "P5", "Receipt date (first payment " & Trim$(CStr(firstPay(1))) & ")", CrownPullUsDate(CStr(firstPay(3))), True
-    ElseIf bills.Count > 0 Then
-        notes.Add carrier & "'s billing schedule shows no payment received yet"
+    Else
+        If bills.Count > 0 Then notes.Add carrier & "'s billing schedule shows no payment received yet"
+        If carrier = "United" Then
+            CrownPullAdd changes, wsEdit, "N8", "Amount (first payment)", ""
+            CrownPullAdd changes, wsEdit, "O8", "Amount to Co (first payment)", ""
+            CrownPullAdd changes, wsEdit, "P8", "Amount Paid (first payment)", ""
+        End If
     End If
 
     If Not IsEmpty(firstInst) Then
         CrownPullAdd changes, wsEdit, "V8", "Monthly", Format$(Val(firstInst(4)), "0.00")
-        If Len(CrownPullUsDate(CStr(firstInst(3)))) > 0 Then
-            CrownPullAdd changes, wsEdit, "F29", "Monthly payment day", CrownPayDayWords(Day(CDate(CrownPullUsDate(CStr(firstInst(3))))))
+        ' The Due date of the instalment, as the payment run reads it.
+        If Len(CrownPullUsDate(CStr(firstInst(2)))) > 0 Then
+            CrownPullAdd changes, wsEdit, "F29", "Monthly payment day", CrownPayDayWords(Day(CDate(CrownPullUsDate(CStr(firstInst(2))))))
         End If
+    ElseIf carrier = "United" Then
+        notes.Add "United shows no instalment yet (a new policy is billed later), so Monthly and Monthly Payment Day are blank"
+        CrownPullAdd changes, wsEdit, "V8", "Monthly", ""
+        CrownPullAdd changes, wsEdit, "F29", "Monthly payment day", ""
     End If
 
     ' --- UW letters into the admin note (due date + the Transaction text) -------
@@ -803,10 +849,14 @@ Private Sub CrownPullAdd(ByVal changes As Collection, ByVal ws As Worksheet, ByV
     Dim have As String
 
     united = Trim$(united)
-    If Len(united) = 0 Then Exit Sub
-
     have = Trim$(ws.Range(addr).Text)
     If mPullBlank Then have = ""
+
+    ' Nothing from the carrier: blank on Edit Data too (United), or left alone.
+    If Len(united) = 0 Then
+        If mPullClear And Len(have) > 0 Then changes.Add Array(addr, what, have, "", False)
+        Exit Sub
+    End If
 
     If asDate Then
         If Not IsDate(united) Then Exit Sub
