@@ -176,6 +176,44 @@ Public Function CrownVervePickCompany(ByVal drv As Object, Optional ByVal waitSe
     CrownNoteBlocker "Verve first page: " & CrownVervePickCompany
 End Function
 
+' Presses Continue on Verve's first page, found by its word (2 Nov: its id
+' changed when Verve added the Company box, and FillVerve looked for the old
+' one - "..._CSLCallbackPanel_ContinueButton not found"). Waits up to 20
+' seconds for it; if it never shows, the page goes on QuoteLook and the
+' quote stops with that reason instead of a box asking to retry.
+Public Sub CrownVerveContinue(ByVal drv As Object)
+    Dim answer As String, started As Date
+
+    started = Now
+
+    Do
+        answer = ""
+        On Error Resume Next
+        answer = CStr(drv.ExecuteScript( _
+            "function vis(e){return !!(e&&e.getClientRects&&e.getClientRects().length);}" & _
+            "var c=[].slice.call(document.querySelectorAll('input[type=button],input[type=submit],button,a,div[id*=Continue],span[id*=Continue],td[id*=Continue]')).filter(function(x){" & _
+            "if(!vis(x)||x.disabled)return false;var t=((x.value||'')+' '+(x.innerText||'')).replace(/\s+/g,' ').trim().toLowerCase();" & _
+            "return t==='continue'&&!x.querySelector('input,button');});" & _
+            "c.sort(function(a,b){return (/continue/i.test(b.id)?1:0)-(/continue/i.test(a.id)?1:0);});" & _
+            "if(!c.length)return 'none';var b=c[0];setTimeout(function(){b.click();},50);return 'clicked '+(b.id||b.tagName);"))
+        Err.Clear
+        On Error GoTo 0
+
+        If Left$(answer, 7) = "clicked" Then
+            CrownNoteBlocker "Verve first page: Continue " & answer
+            Exit Sub
+        End If
+
+        If (Now - started) * 86400 > 20 Then Exit Do
+        drv.Wait 1000
+        DoEvents
+    Loop
+
+    CrownNotePage drv, "Verve first page: no Continue button found"
+    CrownLastAlert = "Verve: the first page has no Continue button the tool can find - QuoteLook has the page"
+    Err.Raise vbObjectError + 712, "CrownVerveContinue", CrownLastAlert
+End Sub
+
 ' Finds the drop-down beside the label (Company / LOB). "already <value>"
 ' when it holds the wanted one (or anything, when nothing is wanted),
 ' "opened" after opening it, "no <label> box" when the page has none.
