@@ -154,6 +154,7 @@ Public Function CrownVervePickCompany(ByVal drv As Object, Optional ByVal waitSe
 
         drv.Wait 900
         answer = CStr(drv.ExecuteScript(CrownVerveItemJs(), want))
+        If Left$(answer, 7) = "clicked" Then drv.FindElementByCss("[data-crown-item]").Click   ' a real click
         drv.Wait 2500
     Next tries
 
@@ -169,6 +170,7 @@ Public Function CrownVervePickCompany(ByVal drv As Object, Optional ByVal waitSe
     If answer = "opened" Then
         drv.Wait 900
         answer = CStr(drv.ExecuteScript(CrownVerveItemJs(), ""))
+        If Left$(answer, 7) = "clicked" Then drv.FindElementByCss("[data-crown-item]").Click
         drv.Wait 1500
     End If
 
@@ -195,7 +197,9 @@ Public Sub CrownVerveContinue(ByVal drv As Object)
             "if(!vis(x)||x.disabled)return false;var t=((x.value||'')+' '+(x.innerText||'')).replace(/\s+/g,' ').trim().toLowerCase();" & _
             "return t==='continue'&&!x.querySelector('input,button');});" & _
             "c.sort(function(a,b){return (/continue/i.test(b.id)?1:0)-(/continue/i.test(a.id)?1:0);});" & _
-            "if(!c.length)return 'none';var b=c[0];setTimeout(function(){b.click();},50);return 'clicked '+(b.id||b.tagName);"))
+            "if(!c.length)return 'none';var o=document.querySelectorAll('[data-crown-go]');for(var q=0;q<o.length;q++)o[q].removeAttribute('data-crown-go');" & _
+            "c[0].setAttribute('data-crown-go','1');return 'clicked '+(c[0].id||c[0].tagName);"))
+        If Left$(answer, 7) = "clicked" Then drv.FindElementByCss("[data-crown-go]").Click
         Err.Clear
         On Error GoTo 0
 
@@ -242,8 +246,8 @@ Private Function CrownVerveItemJs() As String
         "if(!vis(e)||e.querySelector('td,li,input'))return false;var t=(e.innerText||'').trim();" & _
         "return t&&(want?t.toLowerCase().indexOf(want)>=0&&/insurance company/i.test(t):/listbox/i.test(e.className));});" & _
         "if(!items.length)return 'no '+(want||'first')+' choice in the list';var it=items[0];" & _
-        "['mousedown','mouseup','click'].forEach(function(n){it.dispatchEvent(new MouseEvent(n,{bubbles:true,cancelable:true,view:window}));});" & _
-        "return 'clicked '+it.innerText.trim();"
+        "var o=document.querySelectorAll('[data-crown-item]');for(var q=0;q<o.length;q++)o[q].removeAttribute('data-crown-item');" & _
+        "it.setAttribute('data-crown-item','1');return 'clicked '+it.innerText.trim();"
 End Function
 
 ' The Verve RUN button on the sheets (macro FillVerve) becomes two buttons
@@ -557,8 +561,10 @@ Public Function CrownVervePastFirstPage(ByVal drv As Object) As Boolean
             "var b=document.querySelectorAll('[id$=""NewClientButton_CD""],[id$=""NewClientButton""]');" & _
             "for(var i=0;i<b.length;i++){if(b[i].getClientRects().length)return 'new:'+b[i].id;}" & _
             "var nb=[].slice.call(document.querySelectorAll('input[type=button],input[type=submit],button,a,div,span,td')).filter(function(x){" & _
-            "return x.getClientRects().length&&((x.value||'')+' '+(x.innerText||'')).replace(/\s+/g,' ').trim().toLowerCase()==='new client'&&!x.querySelector('input,button');})[0];" & _
-            "if(nb){setTimeout(function(){nb.click();},50);return 'newtext';}" & _
+            "return x.getClientRects().length&&((x.value||'')+' '+(x.innerText||'')).replace(/\s+/g,' ').trim().toLowerCase()==='new client'&&!x.querySelector('input,button');});" & _
+            "nb.sort(function(a,b){return (/NewClient/i.test(b.id)?2:(b.id?1:0))-(/NewClient/i.test(a.id)?2:(a.id?1:0));});" & _
+            "if(nb.length){var o=document.querySelectorAll('[data-crown-nc]');for(var q=0;q<o.length;q++)o[q].removeAttribute('data-crown-nc');" & _
+            "nb[0].setAttribute('data-crown-nc','1');return 'newtext';}" & _
             "if(document.querySelector('[id*=PolicyHolderAddressControl]'))return 'gone';" & _
             "var e=document.querySelectorAll('.ErrorMessage'),t=[];" & _
             "for(var j=0;j<e.length;j++){if(e[j].getClientRects().length){" & _
@@ -587,13 +593,16 @@ Public Function CrownVervePastFirstPage(ByVal drv As Object) As Boolean
 
             CrownNoteBlocker "Verve: existing-client pop-up - pressed New Client"
 
-            ' "newtext": the button was found by its words and already clicked (2 Nov).
-            If answer <> "newtext" Then
-                On Error Resume Next
+            ' A real click (Selenium), not a script click: Verve's buttons only
+            ' answer a real mouse press (2 Nov - the script click did nothing).
+            On Error Resume Next
+            If answer = "newtext" Then
+                drv.FindElementByCss("[data-crown-nc]").Click
+            Else
                 drv.FindElementById(Mid$(answer, 5)).Click
-                Err.Clear
-                On Error GoTo 0
             End If
+            Err.Clear
+            On Error GoTo 0
 
             drv.Wait 2500
         ElseIf Left$(answer, 6) = "error:" Then
