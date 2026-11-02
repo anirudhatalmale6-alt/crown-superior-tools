@@ -129,16 +129,26 @@ End Sub
 ' Chooses the Company (and, if it came up empty, the LOB) on Verve's first
 ' page. Safe to call more than once: "already" when it is chosen. Returns
 ' what happened, for QuoteLook.
-Public Function CrownVervePickCompany(ByVal drv As Object) As String
-    Dim want As String, answer As String, tries As Long
+Public Function CrownVervePickCompany(ByVal drv As Object, Optional ByVal waitSeconds As Long = 0) As String
+    Dim want As String, answer As String, tries As Long, started As Date
 
     want = IIf(Len(CrownVerveCompany) > 0, CrownVerveCompany, "Benchmark")
 
     ' Never the reason FillVerve stops: whatever goes wrong here is only noted.
     On Error Resume Next
 
-    For tries = 1 To 3
+    ' The Company box only appears once the ZIP has been looked up (City /
+    ' State / County show first) - so it may need a moment.
+    started = Now
+    Do
         answer = CStr(drv.ExecuteScript(CrownVerveComboJs(), Array("Company", want)))
+        If Left$(answer, 2) <> "no" Or (Now - started) * 86400 >= waitSeconds Then Exit Do
+        drv.Wait 1000
+        DoEvents
+    Loop
+
+    For tries = 1 To 3
+        If tries > 1 Or Left$(answer, 6) <> "opened" Then answer = CStr(drv.ExecuteScript(CrownVerveComboJs(), Array("Company", want)))
 
         If Left$(answer, 7) = "already" Or Left$(answer, 2) = "no" Then Exit For
 
@@ -148,6 +158,11 @@ Public Function CrownVervePickCompany(ByVal drv As Object) As String
     Next tries
 
     CrownVervePickCompany = "Company " & want & ": " & answer
+
+    ' Not chosen: the whole page goes on QuoteLook, so the box can be found.
+    If waitSeconds > 0 And Left$(answer, 7) <> "already" Then
+        CrownNotePage drv, "Verve first page: Company " & want & " NOT chosen (" & answer & ")"
+    End If
 
     ' The LOB follows the Company; if it is still empty, its first choice.
     answer = CStr(drv.ExecuteScript(CrownVerveComboJs(), Array("LOB", "")))
