@@ -66,8 +66,8 @@ Public Sub CrownRecordPolicyPages()
             Exit Sub
         End If
 
-        EnterData drv, Keys, "LoginControl_LoginNameTextBox", wsInput.Range("USER_2").value, "ID"
-        EnterData drv, Keys, "LoginControl_PasswordTextBox", wsInput.Range("PASS_2").value, "ID"
+        EnterData drv, Keys, "LoginControl_LoginNameTextBox", wsInput.Range("USER_2").value, "ID", "", True
+        EnterData drv, Keys, "LoginControl_PasswordTextBox", wsInput.Range("PASS_2").value, "ID", "", True
         ClickElement drv, "LoginControl_LoginLinkButton", "ID"
 
         If Not CrownLookWait(drv, By, "QuickPolicyLookupControl_NumberInsCombo_I", 60) Then
@@ -137,8 +137,8 @@ Public Sub CrownRecordPolicyPages()
     Else
         ' ---------------------------------------------------- United
         drv.Get wsInput.Range("URL_26").value
-        EnterData drv, Keys, "tbxUserID", wsInput.Range("USER_26").value, "ID"
-        EnterData drv, Keys, "tbxPassword", wsInput.Range("PASS_26").value, "ID"
+        EnterData drv, Keys, "tbxUserID", wsInput.Range("USER_26").value, "ID", "", True
+        EnterData drv, Keys, "tbxPassword", wsInput.Range("PASS_26").value, "ID", "", True
         drv.Keyboard.SendKeys Keys.Enter
 
         If Not CrownLookWait(drv, By, "rpthref", 60) Then
@@ -398,8 +398,8 @@ Public Sub CrownPullUnitedPolicy()
 
     ' Same way in as the payment run and the recorder.
     drv.Get wsInput.Range("URL_26").value
-    EnterData drv, Keys, "tbxUserID", wsInput.Range("USER_26").value, "ID"
-    EnterData drv, Keys, "tbxPassword", wsInput.Range("PASS_26").value, "ID"
+    EnterData drv, Keys, "tbxUserID", wsInput.Range("USER_26").value, "ID", "", True
+    EnterData drv, Keys, "tbxPassword", wsInput.Range("PASS_26").value, "ID", "", True
     drv.Keyboard.SendKeys Keys.Enter
 
     If Not CrownLookWait(drv, By, "rpthref", 60) Then
@@ -460,11 +460,15 @@ Private Sub CrownPullApply(ByVal answer As String, ByVal policyNo As String, ByV
     Dim dCols As Variant, vCols As Variant, col As String, item As Variant
     Dim vNames As Collection, vn As Variant, w() As String
     Dim keepRow As Variant, failed As String
+    Dim bills As Collection, uws As Collection, firstPay As Variant, firstInst As Variant
+    Dim adminNow As String, adminAdd As String, uwLine As String
 
     Set wsEdit = ThisWorkbook.Worksheets("Edit Data")
     keepRow = wsEdit.Range("C5").value
     mPullBlank = newRow
     Set vNames = New Collection
+    Set bills = New Collection
+    Set uws = New Collection
 
     ' --- what the carrier says -------------------------------------------------
     Set drivers = New Collection: Set vehicles = New Collection
@@ -488,6 +492,8 @@ Private Sub CrownPullApply(ByVal answer As String, ByVal policyNo As String, ByV
             Case "LIEN": liens.Add f
             Case "ADDR": addr = f
             Case "VEHNAME": vNames.Add f
+            Case "BILL": bills.Add f
+            Case "UW": uws.Add f
         End Select
     Next k
 
@@ -627,6 +633,47 @@ Private Sub CrownPullApply(ByVal answer As String, ByVal policyNo As String, ByV
 
     If liens.Count > 0 And vehicles.Count > 1 Then
         notes.Add carrier & " lists lienholders without saying which vehicle each is for - they were matched in order, check them"
+    End If
+
+    ' --- payment (Tony, 2 Nov: "payment made was 299.89. So that should go in
+    ' paid to company and amount paid, first payment date") ---------------------
+    ' The first money IN on the billing schedule (a minus amount: Sweep,
+    ' E-Check, Payment ...) is the first payment; the first Installment line
+    ' gives the monthly amount and the day of the month it falls on.
+    firstPay = Empty: firstInst = Empty
+    For Each item In bills
+        If IsEmpty(firstPay) And Val(item(4)) < 0 Then firstPay = item
+        If IsEmpty(firstInst) And LCase$(Left$(Trim$(CStr(item(1))), 11)) = "installment" And Val(item(4)) > 0 Then firstInst = item
+    Next item
+
+    If Not IsEmpty(firstPay) Then
+        CrownPullAdd changes, wsEdit, "O8", "Amount to Co (first payment)", Format$(-Val(firstPay(4)), "0.00")
+        CrownPullAdd changes, wsEdit, "P8", "Amount Paid (first payment)", Format$(-Val(firstPay(4)), "0.00")
+        CrownPullAdd changes, wsEdit, "P5", "Receipt date (first payment " & Trim$(CStr(firstPay(1))) & ")", CrownPullUsDate(CStr(firstPay(3))), True
+    ElseIf bills.Count > 0 Then
+        notes.Add carrier & "'s billing schedule shows no payment received yet"
+    End If
+
+    If Not IsEmpty(firstInst) Then
+        CrownPullAdd changes, wsEdit, "V8", "Monthly", Format$(Val(firstInst(4)), "0.00")
+        If Len(CrownPullUsDate(CStr(firstInst(3)))) > 0 Then
+            CrownPullAdd changes, wsEdit, "F29", "Monthly payment day", CrownPayDayWords(Day(CDate(CrownPullUsDate(CStr(firstInst(3))))))
+        End If
+    End If
+
+    ' --- UW letters into the admin note (due date + the Transaction text) -------
+    adminNow = CStr(wsEdit.Range("U13").value)
+    adminAdd = ""
+    For Each item In uws
+        uwLine = "UW letter due " & Trim$(CStr(item(1))) & ": " & Trim$(CStr(item(2)))
+        If InStr(1, adminNow, uwLine, vbTextCompare) = 0 And InStr(1, adminAdd, uwLine, vbTextCompare) = 0 Then
+            adminAdd = adminAdd & IIf(Len(adminAdd) > 0, vbLf, "") & uwLine
+        End If
+    Next item
+
+    If Len(adminAdd) > 0 Then
+        CrownPullAdd changes, wsEdit, "U13", "Admin note (UW letters added)", _
+                     IIf(Len(Trim$(adminNow)) > 0 And Not mPullBlank, adminNow & vbLf, "") & adminAdd
     End If
 
     ' --- the report ---------------------------------------------------------
@@ -769,14 +816,40 @@ Private Sub CrownPullAdd(ByVal changes As Collection, ByVal ws As Worksheet, ByV
         united = Format$(CDate(united), "mm/dd/yyyy")
     Else
         If StrComp(Application.WorksheetFunction.Trim(have), Application.WorksheetFunction.Trim(united), vbTextCompare) = 0 Then Exit Sub
-        ' "GAI-206097" and "GAI 206097" are the same number.
-        If addr = "C7" And CrownDigits(have) = CrownDigits(united) And Len(CrownDigits(have)) > 0 Then Exit Sub
+        ' C7: the policy number exactly as the carrier writes it (Tony, 2 Nov:
+        ' "Policy number which is the main thing didn't update" - Edit Data had
+        ' "GAI -214532", United "GAI-214532"; same digits used to count as same).
         ' Same phone in another layout.
         If addr = "H8" And CrownDigits(have) = CrownDigits(united) Then Exit Sub
     End If
 
     changes.Add Array(addr, what, have, united, asDate)
 End Sub
+
+' "10-04-26" / "10-04-2026" -> "10/04/2026" (or "" when it is not a date).
+Private Function CrownPullUsDate(ByVal s As String) As String
+    Dim p() As String
+
+    p = Split(Trim$(s), "-")
+    If UBound(p) <> 2 Then Exit Function
+    If Len(p(2)) = 2 Then p(2) = "20" & p(2)
+
+    If IsDate(p(0) & "/" & p(1) & "/" & p(2)) Then CrownPullUsDate = Format$(DateSerial(Val(p(2)), Val(p(0)), Val(p(1))), "mm/dd/yyyy")
+End Function
+
+' 4 -> "4th of each month  " - the spelling (two trailing spaces) of Edit Data's list.
+Private Function CrownPayDayWords(ByVal d As Long) As String
+    Dim suffix As String
+
+    Select Case d
+        Case 1, 21, 31: suffix = "st"
+        Case 2, 22: suffix = "nd"
+        Case 3, 23: suffix = "rd"
+        Case Else: suffix = "th"
+    End Select
+
+    CrownPayDayWords = d & suffix & " of each month  "
+End Function
 
 Private Function CrownPullFirst(ByVal fullName As String) As String
     Dim w() As String
@@ -889,6 +962,14 @@ Private Function CrownPullUnitedJs() As String
         "if(c[0]==='Lienholder'&&c[1]==='Address'){inLien=true;continue;}" & _
         "if(inLien){if(c.length===2&&c[0]&&!/Coverages|Information/i.test(c[0]))out.push('LIEN|'+c[0]+'|'+c[1]);else inLien=false;}}" & _
         "if(inCov)out.push('COV|'+cov+'|'+coll+'|'+comp);" & _
+        "var inBill=false,uwCols=null;" & _
+        "for(var i=0;i<rows.length;i++){var c=cells(rows[i]),line=c.join(' ');" & _
+        "if(c[0]==='Statement'&&/Amount/.test(line)){inBill=true;continue;}" & _
+        "if(inBill){var m=line.match(/\$\s*(-?[0-9,]+\.\d\d)/),ds=line.match(/\d\d-\d\d-\d\d(\d\d)?/g);" & _
+        "if(m&&ds&&c[0]&&!/^\{/.test(c[0])){out.push('BILL|'+c[0]+'|'+ds[0]+'|'+ds[ds.length-1]+'|'+m[1].replace(/,/g,''));continue;}inBill=false;}" & _
+        "var ti=-1,di=-1;for(var q=0;q<c.length;q++){if(/^transaction/i.test(c[q]))ti=q;if(/due/i.test(c[q])&&c[q].length<20)di=q;}" & _
+        "if(ti>=0&&di>=0&&c[0]!=='Statement'){uwCols=[ti,di];continue;}" & _
+        "if(uwCols){if(c.length>Math.max(uwCols[0],uwCols[1])&&/\d/.test(c[uwCols[1]]||'')&&c[uwCols[0]]){out.push('UW|'+c[uwCols[1]]+'|'+c[uwCols[0]]+'|'+line);}else uwCols=null;}}" & _
         "return out.join('\n');"
 End Function
 
