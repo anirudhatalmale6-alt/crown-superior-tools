@@ -40,6 +40,13 @@ Public CrownVerveDirectMonthly As String
 Public CrownVerveFirstDue As String
 Public CrownVerveDirectFirstDue As String
 
+' 2 Nov (Tony): Verve's first quote page now asks for the Company -
+' "Benchmark Insurance Company" or "Trisura Insurance Company" (LOB then
+' Benchmark 1.2 / Verve 1.2). "Benchmark" or "Trisura"; empty = Benchmark,
+' which is what automatic quoting uses ("tool has to select benchmark
+' insurance where shown").
+Public CrownVerveCompany As String
+
 ' Words that only appear on the pages they belong to.
 Private Const ON_COVERAGES As String = "Vehicle Level Coverages"
 Private Const ON_QUESTIONS As String = "Are all residents of the household"
@@ -103,6 +110,133 @@ Public Function CrownVerveQuote(ByRef down As String, ByRef monthly As String, _
 
     CrownVerveQuote = note
 End Function
+
+
+' The two Verve buttons (Alt+F8 CrownMakeVerveButtons puts them on the sheet).
+Public Sub FillVerveTrisura()
+    CrownVerveCompany = "Trisura"
+    FillVerve
+    CrownVerveCompany = ""
+End Sub
+
+Public Sub FillVerveBenchmark()
+    CrownVerveCompany = "Benchmark"
+    FillVerve
+    CrownVerveCompany = ""
+End Sub
+
+
+' Chooses the Company (and, if it came up empty, the LOB) on Verve's first
+' page. Safe to call more than once: "already" when it is chosen. Returns
+' what happened, for QuoteLook.
+Public Function CrownVervePickCompany(ByVal drv As Object) As String
+    Dim want As String, answer As String, tries As Long
+
+    want = IIf(Len(CrownVerveCompany) > 0, CrownVerveCompany, "Benchmark")
+
+    ' Never the reason FillVerve stops: whatever goes wrong here is only noted.
+    On Error Resume Next
+
+    For tries = 1 To 3
+        answer = CStr(drv.ExecuteScript(CrownVerveComboJs(), Array("Company", want)))
+
+        If Left$(answer, 7) = "already" Or Left$(answer, 2) = "no" Then Exit For
+
+        drv.Wait 900
+        answer = CStr(drv.ExecuteScript(CrownVerveItemJs(), want))
+        drv.Wait 2500
+    Next tries
+
+    CrownVervePickCompany = "Company " & want & ": " & answer
+
+    ' The LOB follows the Company; if it is still empty, its first choice.
+    answer = CStr(drv.ExecuteScript(CrownVerveComboJs(), Array("LOB", "")))
+    If answer = "opened" Then
+        drv.Wait 900
+        answer = CStr(drv.ExecuteScript(CrownVerveItemJs(), ""))
+        drv.Wait 1500
+    End If
+
+    CrownVervePickCompany = CrownVervePickCompany & " / LOB: " & answer
+    CrownNoteBlocker "Verve first page: " & CrownVervePickCompany
+End Function
+
+' Finds the drop-down beside the label (Company / LOB). "already <value>"
+' when it holds the wanted one (or anything, when nothing is wanted),
+' "opened" after opening it, "no <label> box" when the page has none.
+Private Function CrownVerveComboJs() As String
+    CrownVerveComboJs = _
+        "var lab=arguments[0],want=(arguments[1]||'').toLowerCase();" & _
+        "function vis(e){return !!(e&&e.getClientRects&&e.getClientRects().length);}" & _
+        "var ls=[].slice.call(document.querySelectorAll('td,span,label,div')).filter(function(e){return vis(e)&&(e.innerText||'').trim().toLowerCase()===lab.toLowerCase()&&!e.querySelector('input');});" & _
+        "if(!ls.length)return 'no '+lab+' box';" & _
+        "var row=ls[0].closest('tr')||ls[0].parentElement;" & _
+        "var inp=[].slice.call(row.querySelectorAll('input')).filter(function(x){return x.type!=='hidden'&&vis(x);})[0];" & _
+        "if(!inp)return 'no '+lab+' input';var v=(inp.value||'').toLowerCase();" & _
+        "if(want?v.indexOf(want)>=0:v!=='')return 'already '+inp.value;" & _
+        "var c=null;try{c=ASPxClientControl.GetControlCollection().Get(inp.id.replace(/_I$/,''));}catch(e){}" & _
+        "if(c&&c.ShowDropDown){c.ShowDropDown();}else{inp.focus();inp.click();var b=row.querySelector('[id$=_B-1],td[id*=_B]');if(b)b.click();}" & _
+        "return 'opened';"
+End Function
+
+' Clicks the open drop-down's item: the one containing the wanted word, or
+' the first one when nothing is wanted.
+Private Function CrownVerveItemJs() As String
+    CrownVerveItemJs = _
+        "var want=(arguments[0]||'').toLowerCase();" & _
+        "function vis(e){return !!(e&&e.getClientRects&&e.getClientRects().length);}" & _
+        "var items=[].slice.call(document.querySelectorAll('td.dxeListBoxItem,td[class*=ListBoxItem],li,td')).filter(function(e){" & _
+        "if(!vis(e)||e.querySelector('td,li,input'))return false;var t=(e.innerText||'').trim();" & _
+        "return t&&(want?t.toLowerCase().indexOf(want)>=0&&/insurance company/i.test(t):/listbox/i.test(e.className));});" & _
+        "if(!items.length)return 'no '+(want||'first')+' choice in the list';var it=items[0];" & _
+        "['mousedown','mouseup','click'].forEach(function(n){it.dispatchEvent(new MouseEvent(n,{bubbles:true,cancelable:true,view:window}));});" & _
+        "return 'clicked '+it.innerText.trim();"
+End Function
+
+' Once: the Verve button on the sheets becomes "Verve (Trisura)" and a
+' "Verve (Benchmark)" button is added beside it. Run it again any time -
+' it does nothing when the Benchmark button is already there.
+Public Sub CrownMakeVerveButtons()
+    Dim ws As Worksheet, shp As Shape, copy As Shape
+    Dim act As String, made As Long, renamed As Long
+
+    For Each ws In ThisWorkbook.Worksheets
+        For Each shp In ws.Shapes
+            act = ""
+            On Error Resume Next
+            act = shp.OnAction
+            On Error GoTo 0
+
+            If LCase$(act) Like "*!fillverve" Or LCase$(act) = "fillverve" Then
+                shp.OnAction = "FillVerveTrisura"
+                CrownSetShapeText shp, "Verve (Trisura)"
+                renamed = renamed + 1
+
+                Set copy = shp.Duplicate
+                copy.Top = shp.Top
+                copy.Left = shp.Left + shp.Width + 6
+                copy.OnAction = "FillVerveBenchmark"
+                CrownSetShapeText copy, "Verve (Benchmark)"
+                made = made + 1
+            End If
+        Next shp
+    Next ws
+
+    MsgBox IIf(renamed = 0, "No button running FillVerve was found - nothing changed." & vbCrLf & _
+               "The macros are there anyway: FillVerveTrisura and FillVerveBenchmark.", _
+               renamed & " Verve button(s) now say Verve (Trisura), and " & made & " Verve (Benchmark) button(s) were added beside them." & vbCrLf & _
+               "Save the workbook (Ctrl+S) to keep them."), vbInformation, "Crown Superior"
+End Sub
+
+Private Sub CrownSetShapeText(ByVal shp As Shape, ByVal text As String)
+    On Error Resume Next
+    shp.TextFrame2.TextRange.text = text
+    If Err.Number <> 0 Then
+        Err.Clear
+        shp.TextFrame.Characters.text = text
+    End If
+    On Error GoTo 0
+End Sub
 
 
 ' From the Coverages page to a price.
