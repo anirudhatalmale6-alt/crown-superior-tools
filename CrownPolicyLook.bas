@@ -463,7 +463,7 @@ Private Sub CrownPullApply(ByVal answer As String, ByVal policyNo As String, ByV
     Dim vNames As Collection, vn As Variant, w() As String
     Dim keepRow As Variant, failed As String
     Dim bills As Collection, uws As Collection, firstPay As Variant, firstInst As Variant
-    Dim adminNow As String, adminAdd As String, uwLine As String, guardNote As String
+    Dim adminNow As String, adminAdd As String, uwLine As String, guardNote As String, nextPay As String
 
     Set wsEdit = ThisWorkbook.Worksheets("Edit Data")
     keepRow = wsEdit.Range("C5").value
@@ -493,13 +493,14 @@ Private Sub CrownPullApply(ByVal answer As String, ByVal policyNo As String, ByV
                 ' being skipped - so only a removed one is left out now.
                 If Not CrownPullGone(CStr(f(8))) Then drivers.Add f
             Case "VEH"
-                If Not CrownPullGone(CStr(f(5))) Then vehicles.Add f
+                If Not CrownPullGone(CStr(f(5))) And Len(Trim$(CStr(f(1)))) > 0 Then vehicles.Add f
             Case "COV": covers.Add f
             Case "LIEN": liens.Add f
             Case "ADDR": addr = f
             Case "VEHNAME": vNames.Add f
             Case "BILL": bills.Add f
             Case "UW": uws.Add f
+            Case "NEXT": nextPay = CStr(f(1))
         End Select
     Next k
 
@@ -639,6 +640,10 @@ Private Sub CrownPullApply(ByVal answer As String, ByVal policyNo As String, ByV
 
         If k > 1 Then CrownPullAdd changes, wsEdit, col & "16", "Vehicle " & k & " - is there a vehicle", "Yes"
         CrownPullAdd changes, wsEdit, col & "17", "Vehicle " & k & " - VIN", UCase$(CStr(item(1)))
+        ' United shortens makes ("CHEV"); a full name already there that starts with it stays.
+        If Len(CStr(item(3))) > 0 And UCase$(Trim$(wsEdit.Range(col & "18").Text)) Like UCase$(Trim$(CStr(item(3)))) & "*" And Not mPullBlank Then
+            item(3) = wsEdit.Range(col & "18").Text
+        End If
         CrownPullAdd changes, wsEdit, col & "18", "Vehicle " & k & " - make", UCase$(CStr(item(3)))
         CrownPullAdd changes, wsEdit, col & "19", "Vehicle " & k & " - year", CStr(item(2))
         CrownPullAdd changes, wsEdit, col & "20", "Vehicle " & k & " - model", UCase$(CStr(item(4)))
@@ -649,7 +654,14 @@ Private Sub CrownPullApply(ByVal answer As String, ByVal policyNo As String, ByV
                 notes.Add "Vehicle " & k & ": " & carrier & " has collision " & covers(k)(2) & " / comprehensive " & covers(k)(3) & _
                           " - not one of Edit Data's choices, deductible left as it is"
             Else
-                CrownPullAdd changes, wsEdit, col & "23", "Vehicle " & k & " - deductible", answer
+                ' Edit Data now holds the website's wording ("$250 Deductible",
+                ' "$1,000 Deductible"); a "250/250" written over it would change it for nothing.
+                If InStr(1, wsEdit.Range(col & "23").Text, "deductible", vbTextCompare) > 0 And InStr(answer, "/") > 0 Then
+                    answer = "$" & Format$(Val(Split(answer, "/")(0)), "#,##0") & " Deductible"
+                End If
+                If Not (Val(CrownDigits(wsEdit.Range(col & "23").Text)) = Val(CrownDigits(Split(answer & "/", "/")(0))) And Val(CrownDigits(answer)) > 0 And Not mPullBlank) Then
+                    CrownPullAdd changes, wsEdit, col & "23", "Vehicle " & k & " - deductible", answer
+                End If
             End If
         End If
 
@@ -718,9 +730,16 @@ Private Sub CrownPullApply(ByVal answer As String, ByVal policyNo As String, ByV
             CrownPullAdd changes, wsEdit, "F29", "Monthly payment day", CrownPayDayWords(Day(CDate(CrownPullUsDate(CStr(firstInst(2))))))
         End If
     ElseIf carrier = "United" Then
-        notes.Add "United shows no instalment yet (a new policy is billed later), so Monthly and Monthly Payment Day are blank"
+        ' No instalment billed yet: United's note "The next recurring Credit Card
+        ' payment is scheduled for 11-15-2026" still gives the day of the month.
         CrownPullAdd changes, wsEdit, "V8", "Monthly", ""
-        CrownPullAdd changes, wsEdit, "F29", "Monthly payment day", ""
+        If Len(CrownPullUsDate(Replace(nextPay, "/", "-"))) > 0 Then
+            CrownPullAdd changes, wsEdit, "F29", "Monthly payment day (next payment " & nextPay & ")", CrownPayDayWords(Day(CDate(CrownPullUsDate(Replace(nextPay, "/", "-")))))
+            notes.Add "United shows no instalment amount yet (a new policy is billed later), so Monthly is blank; next payment " & nextPay
+        Else
+            notes.Add "United shows no instalment yet (a new policy is billed later), so Monthly and Monthly Payment Day are blank"
+            CrownPullAdd changes, wsEdit, "F29", "Monthly payment day", ""
+        End If
     End If
 
     ' --- UW letters into the admin note (due date + the Transaction text) -------
@@ -997,45 +1016,50 @@ Private Function CrownPullGone(ByVal status As String) As Boolean
 End Function
 
 Private Function CrownPullUnitedJs() As String
+    ' 2 Nov: rewritten after Shuntricia Cooper's pull read nothing. United's page
+    ' has empty spacer cells and hidden template rows that the recorder never
+    ' showed; the old reader took the empty cell beside "Policy Number" and the
+    ' hidden empty vehicle. Now: visible rows only, empty cells skipped, and a
+    ' header and its data row matched on their filled-in cells.
     CrownPullUnitedJs = _
-        "var clean=function(s){return (s||'').replace(/[|\r\n]/g,' ').replace(/\s+/g,' ').trim();};" & _
-        "var rows=[].slice.call(document.querySelectorAll('tr')).filter(function(t){return !t.querySelector('tr');});" & _
+        "var clean=function(s){return (s||'').replace(/[|\r\n]/g,' ').replace(/ /g,' ').replace(/\s+/g,' ').trim();};" & _
+        "var vis=function(e){return !!(e.getClientRects&&e.getClientRects().length);};" & _
+        "var rows=[].slice.call(document.querySelectorAll('tr')).filter(function(t){return !t.querySelector('tr')&&vis(t);});" & _
         "var cells=function(t){return t?[].slice.call(t.children).filter(function(c){return c.tagName==='TD'||c.tagName==='TH';}).map(function(c){return clean(c.innerText);}):[];};" & _
-        "var lv=function(l){for(var i=0;i<rows.length;i++){var c=cells(rows[i]);for(var j=0;j<c.length-1;j++){if(c[j].toLowerCase()===l)return c[j+1];}}return '';};" & _
+        "var nz=function(a){return a.filter(function(x){return x!==''&&x!==':';});};" & _
+        "var lv=function(l){for(var i=0;i<rows.length;i++){var c=nz(cells(rows[i]));for(var j=0;j<c.length-1;j++){if(c[j].toLowerCase().replace(/\s*:$/,'')===l&&c[j+1])return c[j+1];}}return '';};" & _
+        "var pair=function(hr,dr){var h=cells(hr),d=cells(dr),hn=nz(h),dn=nz(d);if(hn.length===dn.length)return [hn,dn];return [h,d];};" & _
         "var out=['INS|'+[lv('insured full name'),lv('mailing address'),lv('home phone'),lv('email'),lv('policy status'),lv('policy number')].join('|')];" & _
-        "var nameNear=function(t){var re=/driver\s*#?\s*\d*\s*name\s*:?\s*([A-Za-z][A-Za-z .,'\-]*)/i,m;" & _
-        "var tb=t.closest('table'),k,e;for(k=rows.indexOf(t)-1;k>=0&&k>=rows.indexOf(t)-3;k--){m=cells(rows[k]).join(' ').match(re);if(m)return clean(m[1]);if(/DOB/.test(cells(rows[k]).join(' ')))break;}" & _
-        "if(tb){if(tb.caption&&(m=tb.caption.innerText.match(re)))return clean(m[1]);e=tb.previousElementSibling;" & _
-        "for(k=0;k<3&&e;k++,e=e.previousElementSibling){m=(e.innerText||'').match(re);if(m)return clean(m[1]);}}return '';};" & _
-        "var near=function(t){var tb=t.closest('table'),k,e,j,txt=[];for(k=rows.indexOf(t)-1;k>=0&&k>=rows.indexOf(t)-3;k--){j=cells(rows[k]).join(' ');if(/DOB/.test(j))break;txt.push(j);}" & _
-        "if(tb){if(tb.caption)txt.push(clean(tb.caption.innerText));e=tb.previousElementSibling;for(k=0;k<3&&e;k++,e=e.previousElementSibling){j=clean(e.innerText);if(/DOB/.test(j))break;txt.push(j);}}return txt;};" & _
+        "var nameNear=function(t){var re=/driver\s*#?\s*\d*\s*name\s*:?\s*([A-Za-z][A-Za-z .,'\-]*)/i,m;var tb=t.closest('table'),k,e;for(k=rows.indexOf(t)-1;k>=0&&k>=rows.indexOf(t)-3;k--){m=cells(rows[k]).join(' ').match(re);if(m)return clean(m[1]);if(/DOB/.test(cells(rows[k]).join(' ')))break;}if(tb){if(tb.caption&&(m=tb.caption.innerText.match(re)))return clean(m[1]);e=tb.previousElementSibling;for(k=0;k<3&&e;k++,e=e.previousElementSibling){m=(e.innerText||'').match(re);if(m)return clean(m[1]);}}return '';};" & _
+        "var near=function(t){var tb=t.closest('table'),k,e,j,txt=[];for(k=rows.indexOf(t)-1;k>=0&&k>=rows.indexOf(t)-3;k--){j=cells(rows[k]).join(' ');if(/DOB/.test(j))break;txt.push(j);}if(tb){if(tb.caption)txt.push(clean(tb.caption.innerText));e=tb.previousElementSibling;for(k=0;k<3&&e;k++,e=e.previousElementSibling){j=clean(e.innerText);if(/DOB/.test(j))break;txt.push(j);}}return txt;};" & _
         "var pick=function(t,re){var a=near(t);for(var q=0;q<a.length;q++){var m=a[q].match(re);if(m)return clean(m[1]);}return '';};" & _
         "var reN=/(?:^|\s)name\s*:\s*([A-Za-z][A-Za-z .,'\-]*?)\s*(?:relationship|occupation|$)/i,reR=/relationship\s*:?\s*([A-Za-z][A-Za-z \-]*?)\s*(?:occupation|$)/i;" & _
-        "var cov=0,inCov=false,coll='',comp='',inLien=false;"
-    CrownPullUnitedJs = CrownPullUnitedJs & _
-        "for(var i=0;i<rows.length;i++){var c=cells(rows[i]),line=c.join(' ');" & _
-        "if(c.indexOf('DOB')>=0&&c.indexOf('Gender')>=0){var d=cells(rows[i+1]);" & _
-        "var g=function(k){for(var q=0;q<c.length;q++){if(c[q].toLowerCase().indexOf(k)===0)return q<d.length?d[q]:'';}return '';};" & _
+        "var cov=0,inCov=false,coll='',comp='',inLien=false,inBill=false,uw=null;" & _
+        "for(var i=0;i<rows.length;i++){var c=cells(rows[i]),n=nz(c),line=n.join(' ');" & _
+        "if(n.indexOf('DOB')>=0&&n.indexOf('Gender')>=0&&rows[i+1]){var p=pair(rows[i],rows[i+1]),hh=p[0],d=p[1];" & _
+        "var g=function(k){for(var q=0;q<hh.length;q++){if(hh[q].toLowerCase().indexOf(k)===0)return q<d.length?d[q]:'';}return '';};" & _
         "out.push('DRV|'+[nameNear(rows[i])||pick(rows[i],reN),g('dob'),g('gender'),g('mar'),g('license')||g('id#'),g('st'),g('driver type'),g('status'),pick(rows[i],reR)].join('|'));continue;}" & _
-        "if(c.indexOf('VIN#')>=0&&c.indexOf('Year')>=0){var v=cells(rows[i+1]);" & _
-        "var h=function(k){var q=c.indexOf(k);return q>=0&&q<v.length?v[q]:'';};" & _
-        "out.push('VEH|'+[h('VIN#'),h('Year'),h('Make'),h('Model'),h('Status')].join('|'));continue;}" & _
-        "if(c[0]==='Code'&&/Coverage Description/.test(line)){if(inCov)out.push('COV|'+cov+'|'+coll+'|'+comp);cov++;inCov=true;coll='';comp='';continue;}" & _
-        "if(inCov&&(c[0]==='CLP'||c[0]==='COLL'))coll=c[2]||'';" & _
-        "if(inCov&&(c[0]==='CPP'||c[0]==='COMP'))comp=c[2]||'';"
+        "if(n.indexOf('VIN#')>=0&&n.indexOf('Year')>=0&&rows[i+1]){var p2=pair(rows[i],rows[i+1]),vh=p2[0],v=p2[1];"
     CrownPullUnitedJs = CrownPullUnitedJs & _
-        "if(inCov&&/^Total Premium for Vehicle/i.test(c[0]||'')){out.push('COV|'+cov+'|'+coll+'|'+comp);inCov=false;}" & _
-        "if(c[0]==='Lienholder'&&c[1]==='Address'){inLien=true;continue;}" & _
-        "if(inLien){if(c.length===2&&c[0]&&!/Coverages|Information/i.test(c[0]))out.push('LIEN|'+c[0]+'|'+c[1]);else inLien=false;}}" & _
-        "if(inCov)out.push('COV|'+cov+'|'+coll+'|'+comp);" & _
-        "var inBill=false,uwCols=null;" & _
-        "for(var i=0;i<rows.length;i++){var c=cells(rows[i]),line=c.join(' ');" & _
-        "if(c[0]==='Statement'&&/Amount/.test(line)){inBill=true;continue;}" & _
+        "var h=function(k){var q=vh.indexOf(k);return q>=0&&q<v.length?v[q]:'';};" & _
+        "var vin=h('VIN#'),yr=h('Year'),mk=h('Make'),md=h('Model'),st=h('Status');" & _
+        "if(!/^[A-HJ-NPR-Z0-9]{17}$/i.test(vin)){var vn=nz(cells(rows[i+1]));for(var q=0;q<vn.length;q++){if(/^[A-HJ-NPR-Z0-9]{17}$/i.test(vn[q])){vin=vn[q];}if(/^(19|20)\d\d$/.test(vn[q])&&!/^(19|20)\d\d$/.test(yr)){yr=vn[q];mk=vn[q+1]||'';md=vn[q+2]||'';}}}" & _
+        "out.push('VEH|'+[vin,yr,mk,md,st].join('|'));continue;}" & _
+        "if(n[0]==='Code'&&/Coverage Description/.test(line)){if(inCov)out.push('COV|'+cov+'|'+coll+'|'+comp);cov++;inCov=true;coll='';comp='';continue;}" & _
+        "if(inCov&&/^(CLP|COLL|CLG)$/.test(n[0]||''))coll=n[2]||'';" & _
+        "if(inCov&&/^(CPP|COMP|CPG)$/.test(n[0]||''))comp=n[2]||'';" & _
+        "if(inCov&&/^Total Premium for Vehicle/i.test(n[0]||'')){out.push('COV|'+cov+'|'+coll+'|'+comp);inCov=false;}" & _
+        "if(n[0]==='Lienholder'&&n[1]==='Address'){inLien=true;continue;}" & _
+        "if(inLien){if(n.length===2&&!/Coverages|Information/i.test(n[0])){out.push('LIEN|'+n[0]+'|'+n[1]);continue;}inLien=false;}" & _
+        "if(n[0]==='Statement'&&/Amount/.test(line)){inBill=true;continue;}" & _
         "if(inBill){var m=line.match(/\$\s*(-?[0-9,]+\.\d\d)/),ds=line.match(/\d\d-\d\d-\d\d(\d\d)?/g);" & _
-        "if(m&&ds&&c[0]&&!/^\{/.test(c[0])){out.push('BILL|'+c[0]+'|'+ds[0]+'|'+ds[ds.length-1]+'|'+m[1].replace(/,/g,''));continue;}inBill=false;}" & _
-        "var ti=-1,di=-1;for(var q=0;q<c.length;q++){if(/^transaction/i.test(c[q]))ti=q;if(/due/i.test(c[q])&&c[q].length<20)di=q;}" & _
-        "if(ti>=0&&di>=0&&c[0]!=='Statement'){uwCols=[ti,di];continue;}" & _
-        "if(uwCols){if(c.length>Math.max(uwCols[0],uwCols[1])&&/\d/.test(c[uwCols[1]]||'')&&c[uwCols[0]]){out.push('UW|'+c[uwCols[1]]+'|'+c[uwCols[0]]+'|'+line);}else uwCols=null;}}" & _
+        "if(m&&ds&&n[0]&&!/^\{/.test(n[0])){out.push('BILL|'+n[0]+'|'+ds[0]+'|'+ds[ds.length-1]+'|'+m[1].replace(/,/g,''));continue;}inBill=false;}" & _
+        "var ti=-1,di=-1;for(var q=0;q<n.length;q++){if(/^transaction/i.test(n[q]))ti=q;if(/due/i.test(n[q])&&n[q].length<20)di=q;}" & _
+        "if(ti>=0&&di>=0&&n[0]!=='Statement'){uw={h:n,t:ti,d:di};continue;}" & _
+        "if(uw){if(n.length===uw.h.length&&/\d/.test(n[uw.d]||'')&&n[uw.t]){out.push('UW|'+n[uw.d]+'|'+n[uw.t]+'|'+line);continue;}uw=null;}}" & _
+        "if(inCov)out.push('COV|'+cov+'|'+coll+'|'+comp);" & _
+        "var nx=(document.body.innerText||'').match(/next\s+recurring[^.]*?payment\s+is\s+scheduled\s+for\s+(\d{1,2}[-\/]\d{1,2}[-\/]\d{2,4})/i);if(nx)out.push('NEXT|'+nx[1]);"
+    CrownPullUnitedJs = CrownPullUnitedJs & _
         "return out.join('\n');"
 End Function
 
