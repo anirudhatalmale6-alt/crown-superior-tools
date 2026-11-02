@@ -557,9 +557,9 @@ Public Function CrownVervePastFirstPage(ByVal drv As Object) As Boolean
             "var b=document.querySelectorAll('[id$=""NewClientButton_CD""],[id$=""NewClientButton""]');" & _
             "for(var i=0;i<b.length;i++){if(b[i].getClientRects().length)return 'new:'+b[i].id;}" & _
             "var nb=[].slice.call(document.querySelectorAll('input[type=button],input[type=submit],button,a,div,span,td')).filter(function(x){" & _
-            "return x.getClientRects().length&&((x.value||'')+' '+(x.innerText||'')).replace(/\s+/g,' ').trim().toLowerCase()==='new client'&&!x.querySelector('input,button')&&x.closest('#QACMainDiv,[id*=Pop],[class*=opup],[role=dialog]');})[0];" & _
+            "return x.getClientRects().length&&((x.value||'')+' '+(x.innerText||'')).replace(/\s+/g,' ').trim().toLowerCase()==='new client'&&!x.querySelector('input,button');})[0];" & _
             "if(nb){setTimeout(function(){nb.click();},50);return 'newtext';}" & _
-            "if(!document.getElementById('QACMainDiv'))return 'gone';" & _
+            "if(document.querySelector('[id*=PolicyHolderAddressControl]'))return 'gone';" & _
             "var e=document.querySelectorAll('.ErrorMessage'),t=[];" & _
             "for(var j=0;j<e.length;j++){if(e[j].getClientRects().length){" & _
             "var s=(e[j].innerText||'').replace(/\s+/g,' ').trim();if(s)t.push(s);}}" & _
