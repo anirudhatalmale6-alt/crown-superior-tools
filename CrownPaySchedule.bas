@@ -247,8 +247,9 @@ Private Function CrownPayRunAll(ByVal how As String) As String
 
             Err.Clear
             On Error Resume Next
-            Application.Run macroName
-            If Err.Number <> 0 Then CrownPayLog company, "stopped with an error: " & Err.Description
+            CrownPayCall macroName
+            If Err.Number <> 0 Then CrownPayLog company, "stopped with an error (" & Err.Number & "): " & Err.Description & _
+                                                         " - carried on with the next company"
             Err.Clear
             On Error GoTo 0
 
@@ -269,6 +270,25 @@ Private Function CrownPayRunAll(ByVal how As String) As String
     CrownPayLog "", "payment reports finished"
     CrownPayRunAll = summary
 End Function
+
+
+' Each company's macro called directly, not through Application.Run. An
+' error raised deep in a shared helper (SettingError's Err.Raise 100 when a
+' page box is not there) went straight to the debugger through
+' Application.Run (2 Nov, National General) and the whole run stood still;
+' called directly it comes back here, is logged, and the run goes on.
+Private Sub CrownPayCall(ByVal macroName As String)
+    Select Case LCase$(macroName)
+        Case "crownuaigpaymentdue": CrownUaigPaymentDue
+        Case "crownvervepaymentdue": CrownVervePaymentDue
+        Case "crownassurancepaymentdue": CrownAssurancePaymentDue
+        Case "crowntrexispaymentdue": CrownTrexisPaymentDue
+        Case "crownprogressivepaymentdue": CrownProgressivePaymentDue
+        Case "crownfirstacceptancepaymentdue": CrownFirstAcceptancePaymentDue
+        Case "crownnatgenpaymentdue": CrownNatGenPaymentDue
+        Case Else: Application.Run macroName
+    End Select
+End Sub
 
 
 ' ---------------------------------------------------------------------

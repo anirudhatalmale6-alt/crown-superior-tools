@@ -1097,8 +1097,8 @@ Public Sub CrownUaigPaymentDue()
     If Not CrownChromeOk(drv) Then Exit Sub
 
     drv.Get wsInput.Range("URL_26").value
-    EnterData drv, Keys, "tbxUserID", wsInput.Range("USER_26").value, "ID"
-    EnterData drv, Keys, "tbxPassword", wsInput.Range("PASS_26").value, "ID"
+    EnterData drv, Keys, "tbxUserID", wsInput.Range("USER_26").value, "ID", "", True
+    EnterData drv, Keys, "tbxPassword", wsInput.Range("PASS_26").value, "ID", "", True
     drv.Keyboard.SendKeys Keys.Enter
 
     LoopElementUntilFoundBYXPATH drv, "//a[normalize-space(text())='Quote']"
@@ -2089,8 +2089,8 @@ Private Function CrownVerveRecover(ByVal drv As ChromeDriver, ByVal By As Seleni
 
         If Not signedIn And drv.IsElementPresent(By.ID(VERVE_SIGNIN_BOX)) Then
             On Error Resume Next
-            EnterData drv, Keys, VERVE_SIGNIN_BOX, wsInput.Range("USER_2").value, "ID"
-            EnterData drv, Keys, "LoginControl_PasswordTextBox", wsInput.Range("PASS_2").value, "ID"
+            EnterData drv, Keys, VERVE_SIGNIN_BOX, wsInput.Range("USER_2").value, "ID", "", True
+            EnterData drv, Keys, "LoginControl_PasswordTextBox", wsInput.Range("PASS_2").value, "ID", "", True
             ClickElement drv, "LoginControl_LoginLinkButton", "ID"
             On Error GoTo 0
             signedIn = True
@@ -2290,8 +2290,8 @@ Public Sub CrownVervePaymentDue()
         Exit Sub
     End If
 
-    EnterData drv, Keys, "LoginControl_LoginNameTextBox", wsInput.Range("USER_2").value, "ID"
-    EnterData drv, Keys, "LoginControl_PasswordTextBox", wsInput.Range("PASS_2").value, "ID"
+    EnterData drv, Keys, "LoginControl_LoginNameTextBox", wsInput.Range("USER_2").value, "ID", "", True
+    EnterData drv, Keys, "LoginControl_PasswordTextBox", wsInput.Range("PASS_2").value, "ID", "", True
     ClickElement drv, "LoginControl_LoginLinkButton", "ID"
 
     ' The statuses first, from the Amount Due report - the only place
@@ -3190,8 +3190,8 @@ BackToTheSite:
     drv.SwitchToNextWindow
 
     If CrownWaitFor(drv, By, "ID", "LoginControl_LoginNameTextBox", 20) Then
-        EnterData drv, Keys, "LoginControl_LoginNameTextBox", wsInput.Range("USER_2").value, "ID"
-        EnterData drv, Keys, "LoginControl_PasswordTextBox", wsInput.Range("PASS_2").value, "ID"
+        EnterData drv, Keys, "LoginControl_LoginNameTextBox", wsInput.Range("USER_2").value, "ID", "", True
+        EnterData drv, Keys, "LoginControl_PasswordTextBox", wsInput.Range("PASS_2").value, "ID", "", True
         ClickElement drv, "LoginControl_LoginLinkButton", "ID"
     End If
 

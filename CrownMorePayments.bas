@@ -98,8 +98,8 @@ Public Sub CrownAssurancePaymentDue()
         GoTo Finish
     End If
 
-    EnterData drv, Keys, "//input[@formcontrolname='username']", wsInput.Range("USER_7").value, "XPATH"
-    EnterData drv, Keys, "//input[@formcontrolname='password']", wsInput.Range("PASS_7").value, "XPATH"
+    EnterData drv, Keys, "//input[@formcontrolname='username']", wsInput.Range("USER_7").value, "XPATH", "", True
+    EnterData drv, Keys, "//input[@formcontrolname='password']", wsInput.Range("PASS_7").value, "XPATH", "", True
     ClickElement drv, "//*[@id='login-button']", "XPATH"
 
     ' --- the producer list: rows with both the pencil and the $ ---------
@@ -367,8 +367,8 @@ Public Sub CrownTrexisPaymentDue()
         GoTo Finish
     End If
 
-    EnterData drv, Keys, "loginName", wsInput.Range("USER_6").value, "ID"
-    EnterData drv, Keys, "loginPassword", wsInput.Range("PASS_6").value, "ID"
+    EnterData drv, Keys, "loginName", wsInput.Range("USER_6").value, "ID", "", True
+    EnterData drv, Keys, "loginPassword", wsInput.Range("PASS_6").value, "ID", "", True
     drv.Wait 1000
     ClickElement drv, "//*[@id='loginSubmit']/div[1]/button", "XPATH"
 
@@ -1336,8 +1336,8 @@ Public Function CrownPgSignIn(ByVal drv As ChromeDriver) As Boolean
     Loop While (Now - started) * 86400 < 60
 
     If answer = "login" Then
-        EnterData drv, Keys, "user1", wsInput.Range("USER_4").value, "ID"
-        EnterData drv, Keys, "password1", wsInput.Range("PASS_4").value, "ID"
+        EnterData drv, Keys, "user1", wsInput.Range("USER_4").value, "ID", "", True
+        EnterData drv, Keys, "password1", wsInput.Range("PASS_4").value, "ID", "", True
         ClickElement drv, "image1", "ID"
         drv.Wait 2000
     End If
@@ -1587,8 +1587,8 @@ Public Function CrownFaSignIn(ByVal drv As ChromeDriver) As Boolean
     Loop While (Now - started) * 86400 < 60
 
     If answer = "login" Then
-        EnterData drv, Keys, "v-3", wsInput.Range("USER_25").value, "ID"
-        EnterData drv, Keys, "v-7", wsInput.Range("PASS_25").value, "ID"
+        EnterData drv, Keys, "v-3", wsInput.Range("USER_25").value, "ID", "", True
+        EnterData drv, Keys, "v-7", wsInput.Range("PASS_25").value, "ID", "", True
         drv.Keyboard.SendKeys Keys.Enter
         drv.Wait 3000
     End If
@@ -1630,8 +1630,8 @@ Public Sub CrownAssuranceLook()
 
     If CrownMoreWaitJs(drv, "return (document.querySelector(""input[formcontrolname='username']"")&&" & _
                             "document.querySelector(""input[formcontrolname='password']""))?'ok':'';", 60) Then
-        EnterData drv, Keys, "//input[@formcontrolname='username']", wsInput.Range("USER_7").value, "XPATH"
-        EnterData drv, Keys, "//input[@formcontrolname='password']", wsInput.Range("PASS_7").value, "XPATH"
+        EnterData drv, Keys, "//input[@formcontrolname='username']", wsInput.Range("USER_7").value, "XPATH", "", True
+        EnterData drv, Keys, "//input[@formcontrolname='password']", wsInput.Range("PASS_7").value, "XPATH", "", True
         ClickElement drv, "//*[@id='login-button']", "XPATH"
         drv.Wait 4000
     End If
@@ -1659,8 +1659,8 @@ Public Sub CrownTrexisLook()
     drv.Get wsInput.Range("URL_8").value
 
     If CrownMoreWaitJs(drv, "return (document.getElementById('loginName')&&document.getElementById('loginPassword'))?'ok':'';", 60) Then
-        EnterData drv, Keys, "loginName", wsInput.Range("USER_6").value, "ID"
-        EnterData drv, Keys, "loginPassword", wsInput.Range("PASS_6").value, "ID"
+        EnterData drv, Keys, "loginName", wsInput.Range("USER_6").value, "ID", "", True
+        EnterData drv, Keys, "loginPassword", wsInput.Range("PASS_6").value, "ID", "", True
         drv.Wait 1000
         ClickElement drv, "//*[@id='loginSubmit']/div[1]/button", "XPATH"
     End If
@@ -1830,14 +1830,15 @@ Private Function CrownNgSignIn(ByVal drv As ChromeDriver) As Boolean
     Loop While (Now - started) * 86400 < 30
 
     If answer = "user" Then
-        EnterData drv, Keys, "txtUserID", wsInput.Range("USER_30").value, "ID"
+        ' Clear first: Chrome fills the box in by itself, and the ID was typed on the end of it (2 Nov).
+        EnterData drv, Keys, "txtUserID", wsInput.Range("USER_30").value, "ID", "", True
         ClickElement drv, "btnLogin", "ID"
         CrownMoreWaitJs drv, "return document.getElementById('Password')?'ok':'';", 30
         answer = "pass"
     End If
 
     If answer = "pass" Then
-        EnterData drv, Keys, "Password", wsInput.Range("PASS_30").value, "ID"
+        EnterData drv, Keys, "Password", wsInput.Range("PASS_30").value, "ID", "", True
         ClickElement drv, "//button[contains(text(),'SIGN IN')]", "XPATH"
         drv.Wait 2500
     ElseIf answer = "" Then
