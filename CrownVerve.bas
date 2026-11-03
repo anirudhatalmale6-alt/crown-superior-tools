@@ -178,45 +178,117 @@ Public Function CrownVervePickCompany(ByVal drv As Object, Optional ByVal waitSe
     CrownNoteBlocker "Verve first page: " & CrownVervePickCompany
 End Function
 
-' Presses Continue on Verve's first page, found by its word (2 Nov: its id
-' changed when Verve added the Company box, and FillVerve looked for the old
-' one - "..._CSLCallbackPanel_ContinueButton not found"). Waits up to 20
-' seconds for it; if it never shows, the page goes on QuoteLook and the
-' quote stops with that reason instead of a box asking to retry.
+' Presses Continue on Verve's first page and makes sure it took.
+'
+' 2 Nov: the id changed when Verve added the Company box ("..._CSLCallback
+' Panel_ContinueButton not found"), so the button is found by its word. The
+' first word-finder then pressed the button's inner "_I" input, which Verve
+' ignores - QuoteLook showed "Continue clicked ..._ContinueButton_I" and the
+' page stayed put. So now: wait until Verve is not busy (the Company box
+' loads in the background and a press during that is dropped), press the
+' button itself, and if the page has not moved after 10 seconds, try the
+' next way of pressing it - the button's own press, its inner box, a script
+' press. Stops at the first one that moves the page on.
 Public Sub CrownVerveContinue(ByVal drv As Object)
-    Dim answer As String, started As Date
+    Dim answer As String, state As String, started As Date, pressed As Date
+    Dim way As Long, tried As String
 
     started = Now
 
-    Do
-        answer = ""
-        On Error Resume Next
-        answer = CStr(drv.ExecuteScript( _
-            "function vis(e){return !!(e&&e.getClientRects&&e.getClientRects().length);}" & _
-            "var c=[].slice.call(document.querySelectorAll('input[type=button],input[type=submit],button,a,div[id*=Continue],span[id*=Continue],td[id*=Continue]')).filter(function(x){" & _
-            "if(!vis(x)||x.disabled)return false;var t=((x.value||'')+' '+(x.innerText||'')).replace(/\s+/g,' ').trim().toLowerCase();" & _
-            "return t==='continue'&&!x.querySelector('input,button');});" & _
-            "c.sort(function(a,b){return (/continue/i.test(b.id)?1:0)-(/continue/i.test(a.id)?1:0);});" & _
-            "if(!c.length)return 'none';var o=document.querySelectorAll('[data-crown-go]');for(var q=0;q<o.length;q++)o[q].removeAttribute('data-crown-go');" & _
-            "c[0].setAttribute('data-crown-go','1');return 'clicked '+(c[0].id||c[0].tagName);"))
-        If Left$(answer, 7) = "clicked" Then drv.FindElementByCss("[data-crown-go]").Click
-        Err.Clear
-        On Error GoTo 0
+    For way = 0 To 3
+        ' Not while a look-up is still running.
+        Do
+            state = CrownVerveFirstPageState(drv)
+            If state <> "busy" Or (Now - started) * 86400 > 40 Then Exit Do
+            drv.Wait 700
+            DoEvents
+        Loop
+        If state = "moved" Then Exit For
 
-        If Left$(answer, 7) = "clicked" Then
-            CrownNoteBlocker "Verve first page: Continue " & answer
-            Exit Sub
+        ' The button - up to 20 seconds for it to show.
+        Do
+            answer = ""
+            On Error Resume Next
+            answer = CStr(drv.ExecuteScript(CrownVerveContinueJs(), way))
+            If Left$(answer, 4) = "mark" Then drv.FindElementByCss("[data-crown-go]").Click   ' a real click
+            Err.Clear
+            On Error GoTo 0
+
+            If answer <> "none" Or (Now - started) * 86400 > 20 Then Exit Do
+            drv.Wait 1000
+            DoEvents
+        Loop
+
+        If answer = "none" Then
+            If way = 0 Then
+                CrownNotePage drv, "Verve first page: no Continue button found"
+                CrownLastAlert = "Verve: the first page has no Continue button the tool can find - QuoteLook has the page"
+                Err.Raise vbObjectError + 712, "CrownVerveContinue", CrownLastAlert
+            End If
+
+            Exit For   ' it went away after an earlier press - the page moved
         End If
 
-        If (Now - started) * 86400 > 20 Then Exit Do
-        drv.Wait 1000
-        DoEvents
-    Loop
+        tried = tried & IIf(Len(tried) > 0, ", ", "") & answer
+        CrownNoteBlocker "Verve first page: Continue " & answer
 
-    CrownNotePage drv, "Verve first page: no Continue button found"
-    CrownLastAlert = "Verve: the first page has no Continue button the tool can find - QuoteLook has the page"
+        ' Did it take? A look-up running counts as taking (up to a minute).
+        pressed = Now
+        Do
+            drv.Wait 1000
+            DoEvents
+            state = CrownVerveFirstPageState(drv)
+            If state = "moved" Then Exit For
+            If state <> "busy" And (Now - pressed) * 86400 > 10 Then Exit Do
+        Loop While (Now - pressed) * 86400 < 60
+    Next way
+
+    If state = "moved" Or answer = "none" Then Exit Sub
+
+    CrownNotePage drv, "Verve first page: Continue pressed 4 ways (" & tried & ") and the page did not move"
+    CrownLastAlert = "Verve: Continue on the first page did nothing - QuoteLook has the page"
     Err.Raise vbObjectError + 712, "CrownVerveContinue", CrownLastAlert
 End Sub
+
+' "moved" when the next thing is there (the existing-client pop-up or the
+' address page), "busy" while Verve is still loading something, "here"
+' otherwise.
+Private Function CrownVerveFirstPageState(ByVal drv As Object) As String
+    On Error Resume Next
+    CrownVerveFirstPageState = "here"
+    CrownVerveFirstPageState = CStr(drv.ExecuteScript( _
+        "function vis(e){return !!(e&&e.getClientRects&&e.getClientRects().length);}" & _
+        "if(document.querySelector('[id*=PolicyHolderAddressControl]'))return 'moved';" & _
+        "var nc=[].slice.call(document.querySelectorAll('[id*=NewClientButton],input[type=button],button,a,div,span,td')).filter(function(x){" & _
+        "return vis(x)&&(/NewClientButton/i.test(x.id)||((x.value||'')+' '+(x.innerText||'')).replace(/\s+/g,' ').trim().toLowerCase()==='new client');});" & _
+        "if(nc.length)return 'moved';" & _
+        "try{var cc=ASPxClientControl.GetControlCollection(),busy=false;cc.ForEachControl(function(c){try{if(c.InCallback&&c.InCallback())busy=true;}catch(x){}});if(busy)return 'busy';}catch(x){}" & _
+        "var lp=[].slice.call(document.querySelectorAll('[id*=LoadingPanel],.dxlpLoadingPanel,[class*=dxlpLoadingPanel]')).filter(vis);" & _
+        "if(lp.length)return 'busy';" & _
+        "return 'here';"))
+    Err.Clear
+End Function
+
+' Finds the Continue button itself - not its inner "_I" input or "_CD" box
+' - and, by way: 0 marks it for a real click, 1 uses the button's own press
+' (DevExpress DoClick), 2 marks its inner box for a real click, 3 a script
+' press. "none" when there is no Continue on the page.
+Private Function CrownVerveContinueJs() As String
+    CrownVerveContinueJs = _
+        "var way=+arguments[0];function vis(e){return !!(e&&e.getClientRects&&e.getClientRects().length);}" & _
+        "var root=function(x){var b=x.id?document.getElementById(x.id.replace(/_(I|CD|B)$/,'')):null;if(b&&b!==x&&vis(b))return b;" & _
+        "var p=x.closest('[class*=dxbButton]');return p&&vis(p)?p:x;};" & _
+        "var c=[].slice.call(document.querySelectorAll('[id$=ContinueButton]')).filter(vis);" & _
+        "if(!c.length)c=[].slice.call(document.querySelectorAll('input[type=button],input[type=submit],button,a,div[id*=Continue],span[id*=Continue],td[id*=Continue]')).filter(function(x){" & _
+        "if(!vis(x)||x.disabled)return false;var t=((x.value||'')+' '+(x.innerText||'')).replace(/\s+/g,' ').trim().toLowerCase();" & _
+        "return t==='continue'&&!x.querySelector('button');}).map(root);" & _
+        "if(!c.length)return 'none';var b=c[0];" & _
+        "var o=document.querySelectorAll('[data-crown-go]');for(var q=0;q<o.length;q++)o[q].removeAttribute('data-crown-go');" & _
+        "if(way===1){var k=null;try{k=ASPxClientControl.GetControlCollection().Get(b.id);}catch(x){}if(k&&k.DoClick){k.DoClick();return 'pressed (own press) '+b.id;}way=3;}" & _
+        "if(way===2){var cd=document.getElementById(b.id+'_CD')||b.querySelector('div,span')||b;cd.setAttribute('data-crown-go','1');return 'mark (inner box) '+(cd.id||cd.tagName);}" & _
+        "if(way===3){['mousedown','mouseup','click'].forEach(function(n){b.dispatchEvent(new MouseEvent(n,{bubbles:true,cancelable:true,view:window}));});return 'pressed (script) '+b.id;}" & _
+        "b.setAttribute('data-crown-go','1');return 'mark '+(b.id||b.tagName);"
+End Function
 
 ' Finds the drop-down beside the label (Company / LOB). "already <value>"
 ' when it holds the wanted one (or anything, when nothing is wanted),
