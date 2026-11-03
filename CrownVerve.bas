@@ -47,6 +47,10 @@ Public CrownVerveDirectFirstDue As String
 ' insurance where shown").
 Public CrownVerveCompany As String
 
+' The start of the ids on Policy Info / Drivers / Vehicles, read off the page
+' by CrownVerveIdStart (3 Nov) - FillVerve uses it.
+Public CrownVP As String
+
 ' Words that only appear on the pages they belong to.
 Private Const ON_COVERAGES As String = "Vehicle Level Coverages"
 Private Const ON_QUESTIONS As String = "Are all residents of the household"
@@ -185,8 +189,6 @@ End Function
 ' "..._t0_PolicyHolderAddressControl_HouseNumber"). FillVerve uses CrownVP.
 ' If the box is not there at all, the whole page goes on QuoteLook so the
 ' new ids can be seen.
-Public CrownVP As String
-
 Public Function CrownVerveIdStart(ByVal drv As Object) As String
     Dim answer As String, started As Date
 
