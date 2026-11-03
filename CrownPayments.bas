@@ -775,6 +775,39 @@ Private Function CrownLongCancelled(ByRef parts As Variant, ByRef since As Strin
     CrownLongCancelled = True
 End Function
 
+' The end of the policy period on the website (column 14 of the policy list,
+' 4 Nov) when it is before today, as text; "" otherwise or when not given.
+Public Function CrownPeriodEnded(ByRef parts As Variant) As String
+    Dim ends As Double
+
+    If UBound(parts) < 14 Then Exit Function
+
+    ends = CrownUsDate(CStr(parts(14)))
+    If ends = 0 Or ends >= CDbl(Date) Then Exit Function
+
+    CrownPeriodEnded = Trim$(CStr(parts(14)))
+End Function
+
+' The status the website shows: the Status box, or Policy Status when that is empty.
+Public Function CrownSiteStatus(ByRef parts As Variant) As String
+    If UBound(parts) < 7 Then Exit Function
+
+    CrownSiteStatus = Trim$(CStr(parts(7)))
+    If Len(CrownSiteStatus) = 0 Or LCase$(CrownSiteStatus) = "n/a" Then CrownSiteStatus = Trim$(CStr(parts(6)))
+End Function
+
+' Active, In-Force, Reinstatement, New Business, Renewal... - a word that says
+' the policy is running. Not when it also says cancelled, lapsed or expired.
+Public Function CrownActiveWord(ByVal status As String) As Boolean
+    Dim s As String
+
+    s = LCase$(status)
+    If InStr(s, "cancel") > 0 Or InStr(s, "laps") > 0 Or InStr(s, "expire") > 0 Or InStr(s, "rescind") > 0 Then Exit Function
+
+    CrownActiveWord = InStr(s, "active") > 0 Or InStr(s, "force") > 0 Or InStr(s, "reinstat") > 0 _
+                      Or InStr(s, "new business") > 0 Or InStr(s, "renew") > 0
+End Function
+
 
 ' The "Verify Phone number" dialog, out of the way.
 '
@@ -2233,6 +2266,7 @@ Public Sub CrownVervePaymentDue()
     Dim pageWords As String, quiet As Long
     Dim stmtCancel As String
     Dim notOpened As Long
+    Dim endedOn As String, expiredSet As Long
     Dim finished As Object, finishedWhy As String, rested As Long
     Dim lookupAnswer As String
     Dim signedBackIn As Long
@@ -2347,7 +2381,32 @@ Public Sub CrownVervePaymentDue()
         If CrownVerveRests(finished, policyNo, finishedWhy) Then
             ws.Cells(row, 1).value = recordId
             ws.Cells(row, 2).value = policyNo
-            ws.Cells(row, 8).value = "skipped - " & finishedWhy
+
+            ' 4 Nov (Tony, Mark Aleman GAF20083506): set aside on 10/17 with
+            ' nothing scheduled, while the website still said In-Force for a
+            ' term that ended May 1. "a policy whose period has ended cannot
+            ' be active". So an old term still showing active is put right
+            ' on the way past - Expired - without looking it up again.
+            endedOn = CrownPeriodEnded(parts)
+
+            If Len(endedOn) > 0 And CrownActiveWord(CrownSiteStatus(parts)) Then
+                answer = CrownApiUpdate(CROWN_FORM_POLICY, CLng(recordId), _
+                                        Array("Status_", "Last_Updated"), _
+                                        Array("Expired", Format$(Now, "mm-dd-yyyy hh:mm AM/PM")))
+                ws.Cells(row, 6).value = "Expired"
+                ws.Cells(row, 7).value = Now
+
+                If InStr(1, answer, """ok"":true", vbTextCompare) > 0 Then
+                    ws.Cells(row, 8).value = "written Expired - policy period ended " & endedOn & _
+                                             ", the website still said " & CrownSiteStatus(parts) & ", and " & finishedWhy
+                    expiredSet = expiredSet + 1
+                Else
+                    ws.Cells(row, 8).value = "Expired NOT written (" & IIf(Len(answer) = 0, "website did not answer", answer) & ") - " & finishedWhy
+                End If
+            Else
+                ws.Cells(row, 8).value = "skipped - " & finishedWhy
+            End If
+
             rested = rested + 1
             row = row + 1
             GoTo NextVerve
@@ -2641,6 +2700,23 @@ Public Sub CrownVervePaymentDue()
             ' "New Business", "Renewal" are what last HAPPENED to the policy.
             ' And never over a cancellation the statement itself shows.
             If Len(reported) > 0 And Len(stmtCancel) = 0 And Not CrownIsTransactionWord(reported) Then policyStatus = reported
+
+            ' The policy period on the website has ended (4 Nov). With no
+            ' instalment coming at Verve it is over: Expired, whatever the
+            ' report's word was. If Verve is still billing it, the period on
+            ' the website is the thing to check - said, not changed.
+            endedOn = CrownPeriodEnded(parts)
+
+            If Len(endedOn) > 0 Then
+                If InStr(1, activity, "Installment For", vbTextCompare) > 0 Then
+                    note = Trim$(note & " the website's policy period ended " & endedOn & _
+                                 " but Verve still bills it - check the period on the website")
+                ElseIf Len(policyStatus) = 0 Or CrownActiveWord(policyStatus) Then
+                    policyStatus = "Expired"
+                    note = Trim$(note & " policy period ended " & endedOn & " and nothing is due at Verve - Expired")
+                    expiredSet = expiredSet + 1
+                End If
+            End If
         Else
             note = "no policy of that number at Verve"
         End If
@@ -2722,6 +2798,7 @@ NextVerve:
            badNumber & " had something in the policy number box that is not a policy number." & vbCrLf & _
            done & " written back to the website." & vbCrLf & _
            blank & " had nothing to read and were left as they were." & vbCrLf & _
+           IIf(expiredSet > 0, expiredSet & " old term(s) set to Expired - the policy period on the website had ended and nothing is due at Verve." & vbCrLf, "") & _
            IIf(rested > 0, rested & " passed over - Verve showed them long finished on an earlier run (they are looked at again after " & VERVE_REST_DAYS & " days)." & vbCrLf, "") & _
            IIf(quiet > 0, quiet & " have nothing scheduled at Verve (Next Activity NONE, " & _
                "Future Premium $0.00) - nothing owed, nothing to read." & vbCrLf, "") & _
