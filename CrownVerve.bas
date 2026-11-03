@@ -178,6 +178,45 @@ Public Function CrownVervePickCompany(ByVal drv As Object, Optional ByVal waitSe
     CrownNoteBlocker "Verve first page: " & CrownVervePickCompany
 End Function
 
+' 3 Nov: past the first page, FillVerve fills Policy Info / Drivers /
+' Vehicles by fixed ids that all start "P_L_v212w2" - the Verve 1.1 screens.
+' On Benchmark 1.2 it got to Policy Info and stopped before the address,
+' so the start of those ids is read off the page instead (the address box
+' "..._t0_PolicyHolderAddressControl_HouseNumber"). FillVerve uses CrownVP.
+' If the box is not there at all, the whole page goes on QuoteLook so the
+' new ids can be seen.
+Public CrownVP As String
+
+Public Function CrownVerveIdStart(ByVal drv As Object) As String
+    Dim answer As String, started As Date
+
+    CrownVerveIdStart = "P_L_v212w2"
+    started = Now
+
+    Do
+        answer = ""
+        On Error Resume Next
+        answer = CStr(drv.ExecuteScript( _
+            "var e=document.querySelector('[id$=_t0_PolicyHolderAddressControl_HouseNumber]')||document.querySelector('[id*=PolicyHolderAddressControl_HouseNumber]');" & _
+            "if(!e)return '';var m=e.id.match(/^(.*?)_t0_PolicyHolderAddressControl_HouseNumber/);return m?m[1]:'';"))
+        Err.Clear
+        On Error GoTo 0
+
+        If Len(answer) > 0 Then Exit Do
+        If (Now - started) * 86400 > 30 Then Exit Do
+        drv.Wait 1000
+        DoEvents
+    Loop
+
+    If Len(answer) = 0 Then
+        CrownNotePage drv, "Verve Policy Info page: no address box (..._PolicyHolderAddressControl_HouseNumber) found"
+        Exit Function
+    End If
+
+    If answer <> CrownVerveIdStart Then CrownNoteBlocker "Verve Policy Info page: ids start " & answer & " (were P_L_v212w2)"
+    CrownVerveIdStart = answer
+End Function
+
 ' Presses Continue on Verve's first page and makes sure it took.
 '
 ' 2 Nov: the id changed when Verve added the Company box ("..._CSLCallback
