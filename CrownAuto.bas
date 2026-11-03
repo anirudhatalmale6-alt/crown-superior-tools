@@ -89,6 +89,7 @@ Public Sub CrownAutoQuietStop()
 
     On Error Resume Next
     Application.OnTime Now + TimeSerial(0, 0, 30), "CrownAutoResume"
+    Application.OnTime Now + TimeSerial(0, 0, 40), "CrownPayResume"   ' the payment reports' timer too (3 Nov)
     On Error GoTo 0
 End Sub
 
@@ -144,6 +145,12 @@ Public Sub CrownAutoTick(Optional ByVal chain As String = "")
 
     CrownAutoMode = False
     CrownUnattended = False
+
+    ' A payment run that was due and never started is started now (3 Nov).
+    On Error Resume Next
+    CrownPayWatch
+    Err.Clear
+    On Error GoTo 0
 
     ' The next one is booked after this one has finished, so a long batch
     ' can never have a second run start on top of it.

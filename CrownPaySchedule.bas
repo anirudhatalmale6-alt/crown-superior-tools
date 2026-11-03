@@ -36,6 +36,7 @@ Private Const SCHED_SHEET As String = "PaymentSchedule"
 Private Const LOG_SHEET As String = "PaymentLog"
 Private Const PAY_NAME As String = "CrownPaySchedule"
 Private Const PAY_CHAIN As String = "CrownPayChain"
+Private Const PAY_NEXT As String = "CrownPayNext"
 
 ' Row layout of PaymentSchedule.
 Private Const ROW_TIMES As Long = 4
@@ -102,10 +103,31 @@ End Sub
 ' ---------------------------------------------------------------------
 
 ' Opening the workbook (from Auto_Open) or after an update: book the next
-' run again if the schedule was on.
+' run again if the schedule was on - and if a run was missed while the
+' workbook was closed, run it now.
 Public Sub CrownPayResume()
     If Not CrownPayRemembered() Then Exit Sub
-    If CrownPayBook() > 0 Then CrownPayLog "", "schedule carried on (workbook opened or updated)"
+    If CrownPayCatchUp(2) Then Exit Sub
+    If CrownPayBook() > 0 Then CrownPayLog "", "schedule carried on (workbook opened or updated) - next run " & Format$(CrownPayBooked(), "ddd d mmm h:nn AM/PM")
+End Sub
+
+
+' Called by automatic quoting after each of its rounds (every few minutes).
+' 3 Nov (Tony): "the reports didnt run this morning" - a run can lose its
+' booking (the next one used to be booked only AFTER a run finished, so a
+' run stopped in the debugger and ended booked nothing; an update did not
+' book one either). So: a run more than 10 minutes overdue is run now and
+' the next one booked.
+Public Sub CrownPayWatch()
+    If Not CrownPayRemembered() Or CrownPayRunning Then Exit Sub
+
+    If CrownPayBooked() = 0 Then
+        If CrownPayBook() > 0 Then CrownPayLog "", "schedule had no run booked - next run " & Format$(CrownPayBooked(), "ddd d mmm h:nn AM/PM")
+
+        Exit Sub
+    End If
+
+    CrownPayCatchUp 10
 End Sub
 
 
@@ -114,12 +136,42 @@ Public Sub CrownPayTick(Optional ByVal chain As String = "")
     If chain <> CrownPayChainNow() Then Exit Sub
     If Not CrownPayRemembered() Then Exit Sub
 
+    ' The next one is booked FIRST, so a run that stops half way still
+    ' leaves tomorrow's booked. (Excel never runs two macros at once, so it
+    ' cannot start on top of this one.)
+    CrownPayBook
+
     On Error Resume Next
     CrownPayRunAll "on the timer"
     On Error GoTo 0
-
-    CrownPayBook
 End Sub
+
+
+' A booked run more than graceMinutes overdue (Excel closed, asleep or the
+' booking lost): runs it now, late, and books the next. Older than a day it
+' is not run, only the next one booked. True when it did either.
+Private Function CrownPayCatchUp(ByVal graceMinutes As Long) As Boolean
+    Dim due As Date
+
+    due = CrownPayBooked()
+    If due = 0 Or Now < due + TimeSerial(0, graceMinutes, 0) Then Exit Function
+
+    CrownPayCatchUp = True
+    CrownPayBook
+
+    If Now - due > 1 Then
+        CrownPayLog "", "the " & Format$(due, "ddd d mmm h:nn AM/PM") & " run never started and is over a day old - not run; next run " & _
+                        Format$(CrownPayBooked(), "ddd d mmm h:nn AM/PM")
+
+        Exit Function
+    End If
+
+    CrownPayLog "", "the " & Format$(due, "ddd d mmm h:nn AM/PM") & " run never started (Excel closed, asleep or busy) - running it now"
+
+    On Error Resume Next
+    CrownPayRunAll "late - was due " & Format$(due, "h:nn AM/PM")
+    On Error GoTo 0
+End Function
 
 
 ' Books the next time on the sheet. Returns it, or 0 when there is none.
@@ -135,6 +187,8 @@ Private Function CrownPayBook() As Date
 
     On Error Resume Next
     Application.OnTime nextRun, "'CrownPayTick """ & chain & """'"
+    ThisWorkbook.Names(PAY_NEXT).Delete
+    ThisWorkbook.Names.Add Name:=PAY_NEXT, RefersTo:="=" & Trim$(Str$(CDbl(nextRun))), Visible:=False
     On Error GoTo 0
 
     CrownPayBook = nextRun
@@ -476,6 +530,17 @@ Private Sub CrownPaySetChain(ByVal chain As String)
     ThisWorkbook.Names.Add Name:=PAY_CHAIN, RefersTo:="=""" & chain & """", Visible:=False
     On Error GoTo 0
 End Sub
+
+' When the booked run is due (0 = none booked). Kept in the workbook too.
+Private Function CrownPayBooked() As Date
+    Dim v As String
+
+    On Error Resume Next
+    v = ThisWorkbook.Names(PAY_NEXT).RefersTo
+    On Error GoTo 0
+
+    If Len(v) > 1 Then CrownPayBooked = CDate(Val(Mid$(v, 2)))
+End Function
 
 Private Function CrownPayChainNow() As String
     Dim v As String
