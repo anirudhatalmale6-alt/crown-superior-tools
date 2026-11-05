@@ -940,7 +940,7 @@ End Function
 Private Function CrownCodeWait(ByVal drv As ChromeDriver, ByVal carrier As String, _
                                ByVal readyJs As String, ByVal seconds As Long) As Boolean
     Dim started As Date, answer As String, typed As String, hint As String
-    Dim tries As Long, how As VbMsgBoxResult
+    Dim tries As Long, how As VbMsgBoxResult, askedAt As Date
 
     started = Now
 
@@ -953,10 +953,15 @@ Private Function CrownCodeWait(ByVal drv As ChromeDriver, ByVal carrier As Strin
         answer = CrownMoreJs(drv, CrownCodePageJs())
 
         If answer = "choose" Then
+            ' Unattended (the 6 AM run): by email - the tool can read that one.
+            If CrownPayUnattended Then
+                how = vbNo
+            Else
             how = CrownPayBox(carrier & " wants to send you a verification code." & vbCrLf & vbCrLf & _
                          "Yes = send it by TEXT message" & vbCrLf & _
                          "No = send it by EMAIL" & vbCrLf & _
                          "Cancel = stop the run", vbYesNoCancel + vbQuestion, "Crown Superior")
+            End If
             If how = vbCancel Then Exit Function
 
             If CrownMoreJs(drv, CrownCodeChooseJs(), IIf(how = vbYes, "text", "email")) <> "ok" Then
@@ -977,7 +982,18 @@ Private Function CrownCodeWait(ByVal drv As ChromeDriver, ByVal carrier As Strin
             End If
 
             hint = Left$(Mid$(answer, 6), 200)
-            typed = Trim$(CrownPayInput(carrier & " has sent you a verification code." & vbCrLf & hint & vbCrLf & vbCrLf & _
+            typed = ""
+
+            ' 6 Nov (Tony): the code is emailed to info@crownsuperior.com - read
+            ' it from there first (the website reads the mailbox), and only ask
+            ' a person if no new code email turns up within 2 minutes.
+            If tries = 1 Then
+                If askedAt = 0 Then askedAt = Now
+                typed = CrownMailCode(carrier, askedAt, 120)
+                If Len(typed) > 0 Then CrownPayLog CrownPayCompany, "sign-in code read from the email"
+            End If
+
+            If Len(typed) = 0 Then typed = Trim$(CrownPayInput(carrier & " has sent you a verification code." & vbCrLf & hint & vbCrLf & vbCrLf & _
                                    IIf(tries > 1, "That code was not accepted - check it and type it again." & vbCrLf & vbCrLf, "") & _
                                    "Type the code here and press OK (Cancel stops the run):", _
                                    "Crown Superior - " & carrier & " code"))
@@ -1005,6 +1021,38 @@ Private Function CrownCodeWait(ByVal drv As ChromeDriver, ByVal carrier As Strin
         End If
 
         drv.Wait 800
+        DoEvents
+    Loop While (Now - started) * 86400 < seconds
+End Function
+
+' The newest sign-in code the carrier emailed since askedAt (less a minute),
+' read by the website from the mailbox set up on Messages > Email codes.
+' Asks every 10 seconds for up to the seconds given; "" if none came.
+Private Function CrownMailCode(ByVal carrier As String, ByVal askedAt As Date, ByVal seconds As Long) As String
+    Dim started As Date, answer As String, word As String, within As Long
+
+    word = LCase$(Split(Trim$(carrier) & " ", " ")(0))
+    started = Now
+
+    Do
+        within = Int((Now - askedAt) * 1440) + 2
+        answer = ""
+        On Error Resume Next
+        answer = CrownPost(CrownBody("mailcode") & "&from=" & CrownEnc(word) & "&within=" & within)
+        On Error GoTo 0
+
+        If Left$(answer, 5) = "code," Then
+            CrownMailCode = Trim$(Mid$(answer, 6))
+            Exit Function
+        End If
+
+        ' Not set up, or the login is refused: no point waiting.
+        If InStr(1, answer, "not set up", vbTextCompare) > 0 Or InStr(1, answer, "refused", vbTextCompare) > 0 Then
+            If Len(CrownPayCompany) > 0 Then CrownPayLog CrownPayCompany, "could not read the code from email: " & Mid$(answer, 6)
+            Exit Function
+        End If
+
+        Application.Wait Now + TimeSerial(0, 0, 10)
         DoEvents
     Loop While (Now - started) * 86400 < seconds
 End Function
