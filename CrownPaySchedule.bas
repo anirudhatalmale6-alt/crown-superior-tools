@@ -31,6 +31,8 @@ Public CrownPayUnattended As Boolean
 Public CrownPayRunning As Boolean
 Public CrownPayCompany As String
 Public CrownPayLastSaid As String
+' Why the company now running did not get done, if it did not (6 Nov).
+Public CrownPayTrouble As String
 
 Private Const SCHED_SHEET As String = "PaymentSchedule"
 Private Const LOG_SHEET As String = "PaymentLog"
@@ -275,7 +277,7 @@ End Function
 Private Function CrownPayRunAll(ByVal how As String) As String
     Dim ws As Worksheet
     Dim r As Long, company As String, macroName As String
-    Dim started As Date, summary As String
+    Dim started As Date, summary As String, missed As String
 
     Set ws = CrownPaySheet()
     If ws Is Nothing Then Exit Function
@@ -296,6 +298,7 @@ Private Function CrownPayRunAll(ByVal how As String) As String
         If CrownPayYes(ws.Cells(r, 2).Value) And Len(macroName) > 0 Then
             CrownPayCompany = company
             CrownPayLastSaid = ""
+            CrownPayTrouble = ""
             started = Now
             CrownPayLog company, "started"
 
@@ -304,10 +307,16 @@ Private Function CrownPayRunAll(ByVal how As String) As String
             CrownPayCall macroName
             If Err.Number <> 0 Then CrownPayLog company, "stopped with an error (" & Err.Number & "): " & Err.Description & _
                                                          " - carried on with the next company"
+            If Err.Number <> 0 And Len(CrownPayTrouble) = 0 Then CrownPayTrouble = "stopped with an error: " & Err.Description
             Err.Clear
             On Error GoTo 0
 
             CrownPayLog company, "finished in " & Format$((Now - started) * 1440, "0") & " min"
+
+            If Len(CrownPayTrouble) > 0 Then
+                missed = missed & "- " & company & ": " & CrownPayTrouble & vbCrLf & _
+                         "     run it again with Alt+F8 > " & macroName & vbCrLf
+            End If
             summary = summary & company & ": " & IIf(Len(CrownPayLastSaid) > 0, CrownPayFirstLine(CrownPayLastSaid), "done") & vbCrLf
 
             ' A breath between companies, so the last Chrome window has closed.
@@ -322,8 +331,31 @@ Private Function CrownPayRunAll(ByVal how As String) As String
     CrownPayRunning = False
 
     CrownPayLog "", "payment reports finished"
+
+    ' Tony, 6 Nov: "I also would expect to see a box telling me what report
+    ' was not ran ... so i can immediately run the missing report. If a pop up
+    ' box is up I dont want this to stop ... a quote ... going to auto
+    ' process." A box that does not hold anything up: shown and left open,
+    ' and automatic quoting carries on behind it.
+    If Len(missed) > 0 Then
+        CrownPayLog "", "not done - " & Replace(Replace(missed, vbCrLf, " "), "     ", " ")
+        If how <> "run by hand" Then CrownPayShowMissed "These payment reports did not get done (" & Format$(Now, "ddd h:nn AM/PM") & "):" & vbCrLf & vbCrLf & missed
+        summary = summary & vbCrLf & "Not done:" & vbCrLf & missed
+    End If
+
     CrownPayRunAll = summary
 End Function
+
+
+' The "not done" notice, without stopping anything: his own pop-up form,
+' shown modeless (a MsgBox would hold every macro, quoting too, until OK).
+Private Sub CrownPayShowMissed(ByVal text As String)
+    On Error Resume Next
+    frmOk.Caption = "Crown Superior - payment reports"
+    frmOk.lblMessage.Caption = text
+    frmOk.Show vbModeless
+    On Error GoTo 0
+End Sub
 
 
 ' Each company's macro called directly, not through Application.Run. An
@@ -372,6 +404,12 @@ Public Function CrownPayBox(ByVal prompt As String, Optional ByVal buttons As Vb
     End If
 
     CrownPayLastSaid = prompt
+
+    ' A warning or error box means this company did not get done.
+    If (buttons And &H30) = vbExclamation Or (buttons And &H30) = vbCritical Then
+        If Len(CrownPayTrouble) = 0 Then CrownPayTrouble = CrownPayFirstLine(prompt)
+    End If
+
     CrownPayLog CrownPayCompany, Replace(Replace(prompt, vbCrLf, " "), vbLf, " ") & _
                 IIf(kind = vbOKOnly, "", "  [answered: " & CrownPayAnswerWord(answerWhenAlone) & "]")
 
@@ -388,6 +426,7 @@ Public Function CrownPayInput(ByVal prompt As String, Optional ByVal title As St
 
     CrownPayLog CrownPayCompany, "NEEDS YOU - asked for a code, nobody here to type it, so this company was skipped: " & _
                 Left$(Replace(prompt, vbCrLf, " "), 160)
+    CrownPayTrouble = "asked for a sign-in code - nobody was here to type it"
 End Function
 
 

@@ -353,6 +353,12 @@ Public Sub CrownTrexisPaymentDue()
     drv.AddArgument "--force-device-scale-factor=0.70"
     drv.AddArgument "--disable-extensions"
     drv.AddArgument "--disable-popup-blocking"
+    ' 6 Nov: "export file never arrived in Downloads" (2 and 5 Nov). Chrome is
+    ' told where to save and not to ask, so the file lands in the folder this
+    ' watches - not wherever Windows has moved Downloads to (OneDrive).
+    drv.SetPreference "download.default_directory", Environ$("USERPROFILE") & "\Downloads"
+    drv.SetPreference "download.prompt_for_download", False
+    drv.SetPreference "download.directory_upgrade", True
     drv.Start
     On Error GoTo 0
 
@@ -410,7 +416,11 @@ Public Sub CrownTrexisPaymentDue()
     csvPath = CrownMoreNewDownload(exportAt, 90)
 
     If Len(csvPath) = 0 Then
-        CrownPayBox "Trexis's export file never arrived in Downloads. Nothing has been changed.", _
+        ' What did arrive, if anything, and the page as it was - so the next
+        ' time this happens there is something to go on.
+        CrownNotePage drv, "Trexis export: no CSV file after 90 seconds. New in Downloads: " & CrownMoreNewFiles(exportAt)
+        CrownPayBox "Trexis's export file never arrived in Downloads. Nothing has been changed. " & _
+               "New in Downloads since the export: " & CrownMoreNewFiles(exportAt) & ". The Trexis page is on the QuoteLook sheet.", _
                vbExclamation, "Crown Superior"
         GoTo Finish
     End If
@@ -607,6 +617,20 @@ Private Function CrownMoreNewDownload(ByVal after As Date, ByVal seconds As Long
         Application.Wait Now + TimeSerial(0, 0, 1)
         DoEvents
     Loop While (Now - started) * 86400 < seconds
+End Function
+
+' Every file in Downloads changed since a moment, by name - "nothing" if none.
+Private Function CrownMoreNewFiles(ByVal after As Date) As String
+    Dim fso As Object, file As Object, out As String
+
+    On Error Resume Next
+    Set fso = CreateObject("Scripting.FileSystemObject")
+
+    For Each file In fso.GetFolder(Environ$("USERPROFILE") & "\Downloads").Files
+        If file.DateLastModified >= after - 1 / 86400 Then out = out & IIf(Len(out) > 0, ", ", "") & file.Name
+    Next file
+
+    CrownMoreNewFiles = IIf(Len(out) > 0, Left$(out, 200), "nothing")
 End Function
 
 Private Function CrownMoreReadText(ByVal path As String) As String
@@ -2001,18 +2025,24 @@ End Sub
 ' Active one, else the newest), go to Billing and read it.
 ' "ok|..." (see CrownNgBillingJs), "none", "signedout" or what went wrong.
 Private Function CrownNgOpenBilling(ByVal drv As ChromeDriver, ByVal base As String, ByVal suffix As String) As String
-    Dim answer As String, started As Date
+    Dim answer As String, started As Date, tries As Long
 
-    drv.Get NG_SITE & "/Search.aspx?q=Policy"
+    ' 6 Nov: one policy a run got "the search page did not load" - a slow
+    ' page, not a missing one. It is asked for a second time before giving up.
+    For tries = 1 To 2
+        drv.Get NG_SITE & "/Search.aspx?q=Policy"
 
-    started = Now
-    Do
-        answer = CrownMoreJs(drv, "return document.getElementById('ctl00_MainContent_txtSearchStr')?'ok':" & _
-                                  "((document.getElementById('txtUserID')||location.hostname.indexOf('login.')===0)?'signedout':'');")
-        If Len(answer) > 0 Then Exit Do
-        drv.Wait 700
-        DoEvents
-    Loop While (Now - started) * 86400 < 30
+        started = Now
+        Do
+            answer = CrownMoreJs(drv, "return document.getElementById('ctl00_MainContent_txtSearchStr')?'ok':" & _
+                                      "((document.getElementById('txtUserID')||location.hostname.indexOf('login.')===0)?'signedout':'');")
+            If Len(answer) > 0 Then Exit Do
+            drv.Wait 700
+            DoEvents
+        Loop While (Now - started) * 86400 < 30
+
+        If Len(answer) > 0 Then Exit For
+    Next tries
 
     If answer <> "ok" Then
         CrownNgOpenBilling = IIf(answer = "signedout", "signedout", "the search page did not load")
