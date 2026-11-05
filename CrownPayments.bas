@@ -788,6 +788,25 @@ Public Function CrownPeriodEnded(ByRef parts As Variant) As String
     CrownPeriodEnded = Trim$(CStr(parts(14)))
 End Function
 
+' Writes Expired on an old term and says so on the payments sheet. True when the website took it.
+Private Function CrownWriteExpired(ByVal ws As Worksheet, ByVal row As Long, ByVal recordId As String, _
+                                   ByVal endedOn As String, ByVal siteSaid As String, ByVal why As String) As Boolean
+    Dim answer As String
+
+    answer = CrownApiUpdate(CROWN_FORM_POLICY, CLng(recordId), _
+                            Array("Status_", "Last_Updated"), _
+                            Array("Expired", Format$(Now, "mm-dd-yyyy hh:mm AM/PM")))
+    ws.Cells(row, 6).value = "Expired"
+    ws.Cells(row, 7).value = Now
+
+    If InStr(1, answer, """ok"":true", vbTextCompare) > 0 Then
+        ws.Cells(row, 8).value = "written Expired - policy period ended " & endedOn & ", the website said " & siteSaid & ", and " & why
+        CrownWriteExpired = True
+    Else
+        ws.Cells(row, 8).value = "Expired NOT written (" & IIf(Len(answer) = 0, "website did not answer", answer) & ") - " & why
+    End If
+End Function
+
 ' The status the website shows: the Status box, or Policy Status when that is empty.
 Public Function CrownSiteStatus(ByRef parts As Variant) As String
     If UBound(parts) < 7 Then Exit Function
@@ -2266,7 +2285,7 @@ Public Sub CrownVervePaymentDue()
     Dim pageWords As String, quiet As Long
     Dim stmtCancel As String
     Dim notOpened As Long
-    Dim endedOn As String, expiredSet As Long
+    Dim endedOn As String, expiredSet As Long, oldTerms As Long
     Dim finished As Object, finishedWhy As String, rested As Long
     Dim lookupAnswer As String
     Dim signedBackIn As Long
@@ -2390,19 +2409,7 @@ Public Sub CrownVervePaymentDue()
             endedOn = CrownPeriodEnded(parts)
 
             If Len(endedOn) > 0 And CrownActiveWord(CrownSiteStatus(parts)) Then
-                answer = CrownApiUpdate(CROWN_FORM_POLICY, CLng(recordId), _
-                                        Array("Status_", "Last_Updated"), _
-                                        Array("Expired", Format$(Now, "mm-dd-yyyy hh:mm AM/PM")))
-                ws.Cells(row, 6).value = "Expired"
-                ws.Cells(row, 7).value = Now
-
-                If InStr(1, answer, """ok"":true", vbTextCompare) > 0 Then
-                    ws.Cells(row, 8).value = "written Expired - policy period ended " & endedOn & _
-                                             ", the website still said " & CrownSiteStatus(parts) & ", and " & finishedWhy
-                    expiredSet = expiredSet + 1
-                Else
-                    ws.Cells(row, 8).value = "Expired NOT written (" & IIf(Len(answer) = 0, "website did not answer", answer) & ") - " & finishedWhy
-                End If
+                If CrownWriteExpired(ws, row, recordId, endedOn, CrownSiteStatus(parts), finishedWhy) Then expiredSet = expiredSet + 1
             Else
                 ws.Cells(row, 8).value = "skipped - " & finishedWhy
             End If
@@ -2410,6 +2417,33 @@ Public Sub CrownVervePaymentDue()
             rested = rested + 1
             row = row + 1
             GoTo NextVerve
+        End If
+
+        ' 5 Nov: a term that ended more than 60 days ago is not looked up at
+        ' all. Renewals come under a new number (Tony), so there is nothing
+        ' to read on it - and the 4 Nov run stood still on one of these (an
+        ' old 2025 term) and the companies after Verve never ran. If the
+        ' website still shows it running, or shows nothing, it is written
+        ' Expired on the way past.
+        endedOn = CrownPeriodEnded(parts)
+
+        If Len(endedOn) > 0 Then
+            If CrownUsDate(endedOn) < CDbl(Date) - CANCELLED_LONG_ENOUGH Then
+                ws.Cells(row, 1).value = recordId
+                ws.Cells(row, 2).value = policyNo
+
+                If Len(CrownSiteStatus(parts)) = 0 Or CrownActiveWord(CrownSiteStatus(parts)) Then
+                    If CrownWriteExpired(ws, row, recordId, endedOn, IIf(Len(CrownSiteStatus(parts)) = 0, "nothing", CrownSiteStatus(parts)), _
+                                         "it is not looked up (ended over " & CANCELLED_LONG_ENOUGH & " days ago)") Then expiredSet = expiredSet + 1
+                Else
+                    ws.Cells(row, 8).value = "skipped - policy period ended " & endedOn & ", over " & CANCELLED_LONG_ENOUGH & _
+                                             " days ago (the website says " & CrownSiteStatus(parts) & ")"
+                End If
+
+                oldTerms = oldTerms + 1
+                row = row + 1
+                GoTo NextVerve
+            End If
         End If
 
         activity = ""
@@ -2799,6 +2833,7 @@ NextVerve:
            done & " written back to the website." & vbCrLf & _
            blank & " had nothing to read and were left as they were." & vbCrLf & _
            IIf(expiredSet > 0, expiredSet & " old term(s) set to Expired - the policy period on the website had ended and nothing is due at Verve." & vbCrLf, "") & _
+           IIf(oldTerms > 0, oldTerms & " old terms not looked up - their policy period ended over " & CANCELLED_LONG_ENOUGH & " days ago." & vbCrLf, "") & _
            IIf(rested > 0, rested & " passed over - Verve showed them long finished on an earlier run (they are looked at again after " & VERVE_REST_DAYS & " days)." & vbCrLf, "") & _
            IIf(quiet > 0, quiet & " have nothing scheduled at Verve (Next Activity NONE, " & _
                "Future Premium $0.00) - nothing owed, nothing to read." & vbCrLf, "") & _
