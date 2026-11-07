@@ -1891,9 +1891,12 @@ Private Function CrownNgSignIn(ByVal drv As ChromeDriver) As Boolean
     If Len(url) = 0 Then url = NG_SITE
     drv.Get url
 
+    ' Only boxes you can SEE count (6-7 Nov: a box that was on the page
+    ' but never shown stopped the 6 AM runs with "error (100)" after 30
+    ' seconds - typing into it is what his EnterData waits for).
     started = Now
     Do
-        answer = CrownMoreJs(drv, "return document.getElementById('txtUserID')?'user':(document.getElementById('Password')?'pass':" & _
+        answer = CrownMoreJs(drv, CrownNgVisibleJs() & "return vis('txtUserID')?'user':(vis('Password')?'pass':" & _
                                   "(document.getElementById('ctl00_lblInsName')||document.querySelector('a[href*=PolicySearch]')?'in':''));")
         If Len(answer) > 0 Then Exit Do
         If Len(CrownMoreJs(drv, CrownCodePageJs())) > 0 Then Exit Do
@@ -1905,7 +1908,12 @@ Private Function CrownNgSignIn(ByVal drv As ChromeDriver) As Boolean
         ' Clear first: Chrome fills the box in by itself, and the ID was typed on the end of it (2 Nov).
         EnterData drv, Keys, "txtUserID", wsInput.Range("USER_30").value, "ID", "", True
         ClickElement drv, "btnLogin", "ID"
-        CrownMoreWaitJs drv, "return document.getElementById('Password')?'ok':'';", 30
+        If Not CrownMoreWaitJs(drv, CrownNgVisibleJs() & "return vis('Password')?'ok':'';", 45) Then
+            CrownNotePage drv, "National General sign-in: the password box never showed after the user ID"
+            CrownPayBox "National General took the user ID but never showed the password box. Nothing has been changed. " & _
+                   "The page is on the QuoteLook sheet.", vbExclamation, "Crown Superior"
+            Exit Function
+        End If
         answer = "pass"
     End If
 
@@ -1913,6 +1921,12 @@ Private Function CrownNgSignIn(ByVal drv As ChromeDriver) As Boolean
         EnterData drv, Keys, "Password", wsInput.Range("PASS_30").value, "ID", "", True
         ClickElement drv, "//button[contains(text(),'SIGN IN')]", "XPATH"
         drv.Wait 2500
+    ElseIf answer = "" And CrownPayUnattended Then
+        ' Nobody to sign in by hand: say what the page was, and move on.
+        CrownNotePage drv, "National General sign-in: no user ID or password box showed in 30 seconds"
+        CrownPayBox "National General's sign-in page did not show its user ID or password box. Nothing has been changed. " & _
+               "The page is on the QuoteLook sheet.", vbExclamation, "Crown Superior"
+        Exit Function
     ElseIf answer = "" Then
         CrownPayBox "Please sign in to National General in the Chrome window, then press OK here.", _
                vbInformation, "Crown Superior"
@@ -1926,6 +1940,14 @@ Private Function CrownNgSignIn(ByVal drv As ChromeDriver) As Boolean
         CrownPayBox "Did not get past National General's sign-in. Send me a screenshot of what it shows.", _
                vbExclamation, "Crown Superior"
     End If
+End Function
+
+
+' vis(id): that box is on the page AND showing.
+Private Function CrownNgVisibleJs() As String
+    CrownNgVisibleJs = "var vis=function(id){var e=document.getElementById(id);if(!e)return false;" & _
+                       "var r=e.getBoundingClientRect(),s=getComputedStyle(e);" & _
+                       "return r.width>0&&r.height>0&&s.visibility!=='hidden'&&s.display!=='none';};"
 End Function
 
 

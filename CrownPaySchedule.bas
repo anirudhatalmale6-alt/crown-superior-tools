@@ -276,7 +276,7 @@ End Function
 
 Private Function CrownPayRunAll(ByVal how As String) As String
     Dim ws As Worksheet
-    Dim r As Long, company As String, macroName As String
+    Dim r As Long, company As String, macroName As String, errWhy As String
     Dim started As Date, summary As String, missed As String
 
     Set ws = CrownPaySheet()
@@ -302,12 +302,17 @@ Private Function CrownPayRunAll(ByVal how As String) As String
             started = Now
             CrownPayLog company, "started"
 
+            ' His SettingError leaves the real reason in ErrorText and raises a
+            ' bare 100 ("Application-defined or object-defined error").
+            ErrorText = ""
             Err.Clear
             On Error Resume Next
             CrownPayCall macroName
-            If Err.Number <> 0 Then CrownPayLog company, "stopped with an error (" & Err.Number & "): " & Err.Description & _
+            errWhy = Err.Description
+            If Err.Number = 100 And Len(ErrorText) > 0 Then errWhy = ErrorText
+            If Err.Number <> 0 Then CrownPayLog company, "stopped with an error (" & Err.Number & "): " & errWhy & _
                                                          " - carried on with the next company"
-            If Err.Number <> 0 And Len(CrownPayTrouble) = 0 Then CrownPayTrouble = "stopped with an error: " & Err.Description
+            If Err.Number <> 0 And Len(CrownPayTrouble) = 0 Then CrownPayTrouble = "stopped with an error: " & errWhy
             Err.Clear
             On Error GoTo 0
 
