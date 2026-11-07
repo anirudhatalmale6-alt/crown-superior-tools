@@ -403,22 +403,44 @@ Public Sub CrownTrexisPaymentDue()
         End If
     End If
 
+    ' 7 Nov: the page saved on 6 and 7 Nov had NO results under the search
+    ' (no rows, page list empty) - Search was pressed the moment the button
+    ' appeared, before the page was ready, so Export had nothing to export.
+    ' Now: settle first, press Search, wait for the results (Search again
+    ' if none come), and only then Export.
+    drv.Wait 3000
     ClickElement drv, "searchPolicyQuote", "ID"
+
+    If Not CrownMoreWaitJs(drv, CrownTrexisResultsJs(), 30) Then
+        CrownMoreJs drv, "var b=document.getElementById('searchPolicyQuote');if(b)b.click();return '';"
+        ' Still none seen: noted, and Export is tried anyway (the results
+        ' may be drawn in a way this does not recognise).
+        If Not CrownMoreWaitJs(drv, CrownTrexisResultsJs(), 45) Then
+            CrownNotePage drv, "Trexis search: no results seen after pressing Search twice - trying Export anyway"
+        End If
+    End If
 
     If Not CrownMoreWaitJs(drv, "return document.getElementById('exportPolicyRecordsToCVS')?'ok':'';", 60) Then
         CrownPayBox "Trexis did not show its Export button. Nothing has been changed.", vbExclamation, "Crown Superior"
         GoTo Finish
     End If
 
+    drv.Wait 2000
     exportAt = Now
     ClickElement drv, "exportPolicyRecordsToCVS", "ID"
 
-    csvPath = CrownMoreNewDownload(exportAt, 90)
+    csvPath = CrownMoreNewDownload(exportAt, 45)
+
+    ' Once more if nothing came: pressed from the page itself this time.
+    If Len(csvPath) = 0 Then
+        CrownMoreJs drv, "var b=document.getElementById('exportPolicyRecordsToCVS');if(b)b.click();return '';"
+        csvPath = CrownMoreNewDownload(exportAt, 60)
+    End If
 
     If Len(csvPath) = 0 Then
         ' What did arrive, if anything, and the page as it was - so the next
         ' time this happens there is something to go on.
-        CrownNotePage drv, "Trexis export: no CSV file after 90 seconds. New in Downloads: " & CrownMoreNewFiles(exportAt)
+        CrownNotePage drv, "Trexis export: no CSV file after pressing Export twice (105 seconds). New in Downloads: " & CrownMoreNewFiles(exportAt)
         CrownPayBox "Trexis's export file never arrived in Downloads. Nothing has been changed. " & _
                "New in Downloads since the export: " & CrownMoreNewFiles(exportAt) & ". The Trexis page is on the QuoteLook sheet.", _
                vbExclamation, "Crown Superior"
@@ -1940,6 +1962,16 @@ Private Function CrownNgSignIn(ByVal drv As ChromeDriver) As Boolean
         CrownPayBox "Did not get past National General's sign-in. Send me a screenshot of what it shows.", _
                vbExclamation, "Crown Superior"
     End If
+End Function
+
+
+' "ok" once Trexis's search has put results on the page: rows in a
+' table, or pages to choose from in its page list.
+Private Function CrownTrexisResultsJs() As String
+    CrownTrexisResultsJs = "var p=document.getElementById('policiesPage');if(p&&p.options&&p.options.length>0)return 'ok';" & _
+                           "var t=[].slice.call(document.querySelectorAll('tbody tr')).filter(function(r){" & _
+                           "return r.getClientRects().length&&r.querySelectorAll('td').length>2;});" & _
+                           "return t.length?'ok':'';"
 End Function
 
 
