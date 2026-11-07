@@ -1008,10 +1008,11 @@ Private Function CrownCodeWait(ByVal drv As ChromeDriver, ByVal carrier As Strin
 
             ' 6 Nov (Tony): the code is emailed to info@crownsuperior.com - read
             ' it from there first (the website reads the mailbox), and only ask
-            ' a person if no new code email turns up within 2 minutes.
+            ' a person if no new code email turns up within 3 minutes (7 Nov: the
+            ' Google script that can send it checks Gmail once a minute).
             If tries = 1 Then
                 If askedAt = 0 Then askedAt = Now
-                typed = CrownMailCode(carrier, askedAt, 120)
+                typed = CrownMailCode(carrier, askedAt, 180)
                 If Len(typed) > 0 Then CrownPayLog CrownPayCompany, "sign-in code read from the email"
             End If
 
