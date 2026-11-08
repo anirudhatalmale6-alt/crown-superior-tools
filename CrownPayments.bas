@@ -711,6 +711,20 @@ Private Function CrownVerveRests(ByVal d As Object, ByVal policyNo As String, By
 End Function
 
 ' Write it down (or refresh the date if it is already there).
+' The term on Verve's Policy Info tab (the tab a policy opens on):
+' "Effective|Expiration" as Verve writes them, e.g. "07/15/2026|01/15/2027".
+Private Function CrownVerveTermDates(ByVal drv As ChromeDriver) As String
+    On Error Resume Next
+    CrownVerveTermDates = CStr(drv.ExecuteScript( _
+        "var o={};[].slice.call(document.querySelectorAll('td,th')).forEach(function(c){" & _
+        "var t=(c.innerText||'').replace(/\s+/g,' ').trim();" & _
+        "if((t==='Effective'||t==='Expiration')&&!o[t]&&c.nextElementSibling&&c.getClientRects().length)" & _
+        "o[t]=(c.nextElementSibling.innerText||'').trim();});" & _
+        "return (o.Effective||'')+'|'+(o.Expiration||'');"))
+    On Error GoTo 0
+End Function
+
+
 Private Sub CrownVerveRemember(ByVal policyNo As String, ByVal why As String)
     Dim ws As Worksheet, r As Long, last As Long
 
@@ -1510,7 +1524,9 @@ End Sub
 '
 ' They are listed and agreed to first. A policy record is not something
 ' to create behind someone's back.
-Private Function CrownMakeRenewals(ByVal renewals As Collection, ByVal ws As Object) As Long
+Private Function CrownMakeRenewals(ByVal renewals As Collection, ByVal ws As Object, _
+                                   Optional ByVal carrier As String = "United", _
+                                   Optional ByVal noteCol As Long = 11) As Long
     Dim renewal As Variant
     Dim fields As Variant, values As Variant
     Dim listing As String, answer As String
@@ -1520,18 +1536,26 @@ Private Function CrownMakeRenewals(ByVal renewals As Collection, ByVal ws As Obj
 
     For i = 1 To renewals.Count
         renewal = renewals(i)
-        listing = listing & renewal(8) & " - " & renewal(9) & " is now " & renewal(1)
 
-        If Len(renewal(2)) > 0 Then listing = listing & ", effective " & renewal(2)
+        ' Verve renews under the same number (8 Nov) - then it is the term that is new.
+        If StrComp(CStr(renewal(1)), CStr(renewal(9)), vbTextCompare) = 0 Then
+            listing = listing & renewal(8) & " - " & renewal(9) & " renewed for " & renewal(2) & " to " & renewal(3)
+        Else
+            listing = listing & renewal(8) & " - " & renewal(9) & " is now " & renewal(1)
+            If Len(renewal(2)) > 0 Then listing = listing & ", effective " & renewal(2)
+        End If
 
         listing = listing & vbCrLf
     Next i
 
-    If CrownPayBox(renewals.Count & " of these policies have been renewed at United under a new " & _
-              "number that is not on our website:" & vbCrLf & vbCrLf & listing & vbCrLf & _
+    ' 8 Nov (Tony: the tool "didnt recognize the new policy to create a new
+    ' one for the renewal"): the 6 AM run adds them too - Yes when nobody is
+    ' there to answer. Each one is listed on the PaymentLog.
+    If CrownPayBox(renewals.Count & " of these policies have been renewed at " & carrier & _
+              " and the new term is not on our website yet:" & vbCrLf & vbCrLf & listing & vbCrLf & _
               "Add each one as a new policy, copied from the one we hold, with the new " & _
               "number and dates and ""Renewal"" as the description?", _
-              vbYesNo + vbQuestion, "Crown Superior") <> vbYes Then
+              vbYesNo + vbQuestion, "Crown Superior", vbYes) <> vbYes Then
         Exit Function
     End If
 
@@ -1569,11 +1593,11 @@ Private Function CrownMakeRenewals(ByVal renewals As Collection, ByVal ws As Obj
 
         If InStr(1, answer, """ok"":true", vbTextCompare) > 0 Then
             made = made + 1
-            CrownNoteRenewal ws, CStr(renewal(0)), "renewal added as record " & CrownIdFrom(answer)
+            CrownNoteRenewal ws, CStr(renewal(0)), "renewal added as record " & CrownIdFrom(answer), noteCol
         ElseIf Len(Trim$(answer)) = 0 Then
-            CrownNoteRenewal ws, CStr(renewal(0)), "renewal NOT added - the website did not answer"
+            CrownNoteRenewal ws, CStr(renewal(0)), "renewal NOT added - the website did not answer", noteCol
         Else
-            CrownNoteRenewal ws, CStr(renewal(0)), "renewal NOT added: " & answer
+            CrownNoteRenewal ws, CStr(renewal(0)), "renewal NOT added: " & answer, noteCol
         End If
     Next i
 
@@ -1595,14 +1619,15 @@ Private Function CrownIdFrom(ByVal answer As String) As String
 End Function
 
 ' Put a word about the renewal on the line the policy is already on.
-Private Sub CrownNoteRenewal(ByVal ws As Object, ByVal recordId As String, ByVal words As String)
+Private Sub CrownNoteRenewal(ByVal ws As Object, ByVal recordId As String, ByVal words As String, _
+                             Optional ByVal noteCol As Long = 11)
     Dim r As Long
 
     For r = 2 To 5000
         If Len(Trim$(CStr(ws.Cells(r, 1).value))) = 0 Then Exit For
 
         If CStr(ws.Cells(r, 1).value) = recordId Then
-            ws.Cells(r, 11).value = ws.Cells(r, 11).value & " " & words
+            ws.Cells(r, noteCol).value = ws.Cells(r, noteCol).value & " " & words
             Exit Sub
         End If
     Next r
@@ -2285,8 +2310,11 @@ Public Sub CrownVervePaymentDue()
     Dim pageWords As String, quiet As Long
     Dim stmtCancel As String
     Dim notOpened As Long
-    Dim endedOn As String, expiredSet As Long, oldTerms As Long
+    Dim endedOn As String, expiredSet As Long
     Dim finished As Object, finishedWhy As String, rested As Long
+    Dim renewals As Collection, sameNo As Object, madeCount As Long
+    Dim termEff As String, termExp As String, termOpen As Boolean, noKey As String
+    Dim siteEnds As Double
     Dim lookupAnswer As String
     Dim signedBackIn As Long
     Dim wsLook As Worksheet, lookRow As Long
@@ -2317,6 +2345,29 @@ Public Sub CrownVervePaymentDue()
 
     ' Policies Verve showed as long finished on an earlier run.
     Set finished = CrownVerveFinishedList()
+
+    ' 8 Nov (Tony, Angela Scott GAF20088946): Verve renews under the SAME
+    ' number - renewed 7/15 for six months, while the website held only the
+    ' Jan-Jul term. The latest policy period the website holds for each
+    ' number, so a new term already on the site is not added a second time.
+    Set renewals = New Collection
+    Set sameNo = CreateObject("Scripting.Dictionary")
+    sameNo.CompareMode = vbTextCompare
+
+    For i = 1 To policies.Count
+        parts = policies(i)
+        noKey = Replace(Replace(Trim$(CStr(parts(2))), " ", ""), Chr$(160), "")
+        siteEnds = 0
+        If UBound(parts) >= 14 Then siteEnds = CrownUsDate(CStr(parts(14)))
+
+        If Len(noKey) > 0 Then
+            If Not sameNo.Exists(noKey) Then
+                sameNo.Add noKey, siteEnds
+            ElseIf siteEnds > sameNo(noKey) Then
+                sameNo(noKey) = siteEnds
+            End If
+        End If
+    Next i
 
     Set clsDrv = New Chrm
     Set clsDrv.ChrmDriver = New ChromeDriver
@@ -2397,54 +2448,31 @@ Public Sub CrownVervePaymentDue()
 
         ' Verve itself showed this one as long finished on an earlier run -
         ' not looked up again until a month has gone by.
-        If CrownVerveRests(finished, policyNo, finishedWhy) Then
+        '
+        ' 8 Nov: the list goes by policy number, and Verve renews under the
+        ' same number - so a record whose own term is still running is never
+        ' passed over on account of an older term. And an old term the
+        ' website still shows running is looked up after all (it used to be
+        ' written Expired unseen): it may have renewed.
+        termOpen = False
+        If UBound(parts) >= 14 Then termOpen = (CrownUsDate(CStr(parts(14))) >= CDbl(Date))
+        endedOn = CrownPeriodEnded(parts)
+
+        If CrownVerveRests(finished, policyNo, finishedWhy) And Not termOpen _
+           And Not (Len(endedOn) > 0 And CrownActiveWord(CrownSiteStatus(parts))) Then
             ws.Cells(row, 1).value = recordId
             ws.Cells(row, 2).value = policyNo
-
-            ' 4 Nov (Tony, Mark Aleman GAF20083506): set aside on 10/17 with
-            ' nothing scheduled, while the website still said In-Force for a
-            ' term that ended May 1. "a policy whose period has ended cannot
-            ' be active". So an old term still showing active is put right
-            ' on the way past - Expired - without looking it up again.
-            endedOn = CrownPeriodEnded(parts)
-
-            If Len(endedOn) > 0 And CrownActiveWord(CrownSiteStatus(parts)) Then
-                If CrownWriteExpired(ws, row, recordId, endedOn, CrownSiteStatus(parts), finishedWhy) Then expiredSet = expiredSet + 1
-            Else
-                ws.Cells(row, 8).value = "skipped - " & finishedWhy
-            End If
-
+            ws.Cells(row, 8).value = "skipped - " & finishedWhy
             rested = rested + 1
             row = row + 1
             GoTo NextVerve
         End If
 
-        ' 5 Nov: a term that ended more than 60 days ago is not looked up at
-        ' all. Renewals come under a new number (Tony), so there is nothing
-        ' to read on it - and the 4 Nov run stood still on one of these (an
-        ' old 2025 term) and the companies after Verve never ran. If the
-        ' website still shows it running, or shows nothing, it is written
-        ' Expired on the way past.
-        endedOn = CrownPeriodEnded(parts)
-
-        If Len(endedOn) > 0 Then
-            If CrownUsDate(endedOn) < CDbl(Date) - CANCELLED_LONG_ENOUGH Then
-                ws.Cells(row, 1).value = recordId
-                ws.Cells(row, 2).value = policyNo
-
-                If Len(CrownSiteStatus(parts)) = 0 Or CrownActiveWord(CrownSiteStatus(parts)) Then
-                    If CrownWriteExpired(ws, row, recordId, endedOn, IIf(Len(CrownSiteStatus(parts)) = 0, "nothing", CrownSiteStatus(parts)), _
-                                         "it is not looked up (ended over " & CANCELLED_LONG_ENOUGH & " days ago)") Then expiredSet = expiredSet + 1
-                Else
-                    ws.Cells(row, 8).value = "skipped - policy period ended " & endedOn & ", over " & CANCELLED_LONG_ENOUGH & _
-                                             " days ago (the website says " & CrownSiteStatus(parts) & ")"
-                End If
-
-                oldTerms = oldTerms + 1
-                row = row + 1
-                GoTo NextVerve
-            End If
-        End If
+        ' (5 Nov to 8 Nov a term that ended over 60 days ago was not looked up
+        ' at all, on the word that renewals come under a new number. Verve's
+        ' do not - Angela Scott was written Expired that way while renewed.
+        ' Every term is looked up now; Verve's own waits are limited to 30
+        ' seconds since 5 Nov, which is what stood the 4 Nov run still.)
 
         activity = ""
         dueAmount = ""
@@ -2544,6 +2572,13 @@ Public Sub CrownVervePaymentDue()
                 stopped = True
             End If
         ElseIf CrownWaitFor(drv, By, "XPATH", VERVE_BILLING_TAB, 25) Then
+            ' The term Verve has now (Policy Info opens first): Effective / Expiration.
+            termEff = ""
+            termExp = ""
+            found = CrownVerveTermDates(drv)
+            termEff = CrownPart(found, 0)
+            termExp = CrownPart(found, 1)
+
             ClickElement drv, VERVE_BILLING_TAB, "XPATH"
             drv.Wait 1000
 
@@ -2741,6 +2776,37 @@ Public Sub CrownVervePaymentDue()
             ' the website is the thing to check - said, not changed.
             endedOn = CrownPeriodEnded(parts)
 
+            ' 8 Nov: unless Verve's term ends later than this record's - it
+            ' renewed under the same number. This record is the old term
+            ' (Expired, nothing due on it); the new term gets a record of its
+            ' own, copied from this one, unless the website has it already.
+            If Len(endedOn) > 0 And CrownUsDate(termExp) > CrownUsDate(endedOn) + 7 Then
+                noKey = policyNo
+
+                If sameNo.Exists(noKey) And sameNo(noKey) >= CrownUsDate(termExp) - 7 Then
+                    note = Trim$(note & " renewed at Verve under the same number (" & termEff & " to " & termExp & _
+                                 ") - that term is already on the website as another record")
+                Else
+                    renewals.Add Array(recordId, policyNo, termEff, termExp, dueAmount, dueDate, cancelDate, _
+                                       IIf(Len(policyStatus) > 0, policyStatus, "Active"), _
+                                       Trim$(CStr(parts(4)) & " " & CStr(parts(5))), policyNo)
+                    sameNo(noKey) = CrownUsDate(termExp)        ' so one run cannot offer it twice
+                    note = Trim$(note & " RENEWED at Verve under the same number: new term " & termEff & " to " & termExp)
+                End If
+
+                dueAmount = ""
+                dueDate = ""
+                cancelDate = ""
+                policyStatus = "Expired"
+                note = Trim$(note & " - this record is the term that ended " & endedOn & ", so Expired")
+                expiredSet = expiredSet + 1
+
+                ' Passed over by number from now on - safe, because a record
+                ' whose own term is running is never passed over.
+                CrownVerveRemember policyNo, "renewed under the same number - the new term " & termEff & " to " & termExp & " is its own record"
+                endedOn = ""
+            End If
+
             If Len(endedOn) > 0 Then
                 If InStr(1, activity, "Installment For", vbTextCompare) > 0 Then
                     note = Trim$(note & " the website's policy period ended " & endedOn & _
@@ -2825,6 +2891,9 @@ NextVerve:
         If stopped Then Exit For
     Next i
 
+    ' New terms of same-number renewals, as records of their own (8 Nov).
+    madeCount = CrownMakeRenewals(renewals, ws, "Verve", 8)
+
     ws.Activate
 
     CrownPayBox policies.Count & " Trisura (Verve) policies on the website." & vbCrLf & _
@@ -2833,7 +2902,7 @@ NextVerve:
            done & " written back to the website." & vbCrLf & _
            blank & " had nothing to read and were left as they were." & vbCrLf & _
            IIf(expiredSet > 0, expiredSet & " old term(s) set to Expired - the policy period on the website had ended and nothing is due at Verve." & vbCrLf, "") & _
-           IIf(oldTerms > 0, oldTerms & " old terms not looked up - their policy period ended over " & CANCELLED_LONG_ENOUGH & " days ago." & vbCrLf, "") & _
+           IIf(renewals.Count > 0, renewals.Count & " renewed at Verve under the same number, " & madeCount & " added as new records for the new term." & vbCrLf, "") & _
            IIf(rested > 0, rested & " passed over - Verve showed them long finished on an earlier run (they are looked at again after " & VERVE_REST_DAYS & " days)." & vbCrLf, "") & _
            IIf(quiet > 0, quiet & " have nothing scheduled at Verve (Next Activity NONE, " & _
                "Future Premium $0.00) - nothing owed, nothing to read." & vbCrLf, "") & _
