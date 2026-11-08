@@ -117,8 +117,13 @@ End Function
 
 
 ' The two Verve buttons (Alt+F8 CrownMakeVerveButtons puts them on the sheet).
+'
+' 8 Nov (Tony: "straight from the tool ... not going to benchmark but using
+' the old system"): Verve closed the Trisura line (R-1079 "Software Update
+' in progress, please see Verve 1.2"), so the Trisura half of the button
+' now quotes Benchmark as well. Whichever half is pressed, it is Benchmark.
 Public Sub FillVerveTrisura()
-    CrownVerveCompany = "Trisura"
+    CrownVerveCompany = "Benchmark"
     FillVerve
     CrownVerveCompany = ""
 End Sub
@@ -370,9 +375,11 @@ End Function
 Public Sub CrownMakeVerveButtons()
     Dim ws As Worksheet, shp As Shape, nb As Shape
     Dim act As String, found As String, done As Long, already As Long
-    Dim targets As Collection, t As Variant, w As Double
+    Dim targets As Collection, t As Variant
+    Dim halves As Collection, merged As Long
 
     Set targets = New Collection
+    Set halves = New Collection
 
     For Each ws In ThisWorkbook.Worksheets
         For Each shp In ws.Shapes
@@ -386,50 +393,55 @@ Public Sub CrownMakeVerveButtons()
 
                 If InStr(1, act, "FillVerveBenchmark", vbTextCompare) > 0 Then already = already + 1
                 If LCase$(Mid$(act, InStrRev(act, "!") + 1)) = "fillverve" Then targets.Add shp
+                If InStr(1, act, "FillVerveTrisura", vbTextCompare) > 0 Then halves.Add shp
             End If
         Next shp
     Next ws
 
+    ' 8 Nov: only Benchmark quotes now - two halves become one "Verve" button
+    ' again (the Trisura half widened to the full width, the other half
+    ' removed), running FillVerveBenchmark.
+    For Each t In halves
+        Set shp = t
+        Set nb = Nothing
+        On Error Resume Next
+        Set nb = shp.Parent.Shapes("CrownVerveBenchmark")
+        On Error GoTo 0
+
+        If Not nb Is Nothing Then
+            shp.Width = nb.Left + nb.Width - shp.Left
+            nb.Delete
+        End If
+
+        shp.OnAction = "FillVerveBenchmark"
+        CrownSetShapeText shp, "Verve"
+        merged = merged + 1
+    Next t
+
+    If merged > 0 Then
+        MsgBox "Done: the Verve button is one button again and quotes on Benchmark." & vbCrLf & vbCrLf & _
+               "Press Ctrl+S to keep it.", vbInformation, "Crown Superior"
+        Exit Sub
+    End If
+
+    ' Benchmark only now: a plain FillVerve button stays one button and runs FillVerveBenchmark.
     For Each t In targets
         Set shp = t
-        w = shp.Width
-
-        On Error Resume Next
-        Err.Clear
-        Set nb = shp.Duplicate
-        If Err.Number <> 0 Or nb Is Nothing Then
-            found = found & "   could not copy '" & shp.Name & "': " & Err.Description & vbCrLf
-            Err.Clear
-            On Error GoTo 0
-        Else
-            On Error GoTo 0
-            ' Two halves of the old button, in its place.
-            shp.Width = w / 2 - 1
-            shp.OnAction = "FillVerveTrisura"
-            CrownSetShapeText shp, "Verve (Trisura)"
-
-            nb.Top = shp.Top
-            nb.Height = shp.Height
-            nb.Width = w / 2 - 1
-            nb.Left = shp.Left + w / 2 + 1
-            nb.OnAction = "FillVerveBenchmark"
-            nb.Name = "CrownVerveBenchmark"
-            CrownSetShapeText nb, "Verve (Benchmark)"
-            done = done + 1
-        End If
+        shp.OnAction = "FillVerveBenchmark"
+        done = done + 1
     Next t
 
     If done > 0 Then
-        MsgBox "Done: the Verve RUN button is now two buttons side by side - Verve (Trisura) and Verve (Benchmark)." & vbCrLf & vbCrLf & _
-               "Press Ctrl+S to keep them.", vbInformation, "Crown Superior"
+        MsgBox "Done: the Verve RUN button now quotes on Benchmark." & vbCrLf & vbCrLf & _
+               "Press Ctrl+S to keep it.", vbInformation, "Crown Superior"
     ElseIf already > 0 Then
         MsgBox "The Verve (Benchmark) button is already there:" & vbCrLf & found, vbInformation, "Crown Superior"
     ElseIf Len(found) > 0 Then
         MsgBox "Found these but changed nothing:" & vbCrLf & found & vbCrLf & _
-               "Run FillVerveTrisura / FillVerveBenchmark from Alt+F8 for now, and send me a screenshot of this box.", vbExclamation, "Crown Superior"
+               "Run FillVerveBenchmark from Alt+F8 for now, and send me a screenshot of this box.", vbExclamation, "Crown Superior"
     Else
         MsgBox "No button on any sheet runs FillVerve, so nothing was changed." & vbCrLf & _
-               "Run FillVerveTrisura / FillVerveBenchmark from Alt+F8 for now, and tell me which sheet the Verve button is on.", vbExclamation, "Crown Superior"
+               "Run FillVerveBenchmark from Alt+F8 for now, and tell me which sheet the Verve button is on.", vbExclamation, "Crown Superior"
     End If
 End Sub
 
