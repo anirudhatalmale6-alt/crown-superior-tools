@@ -409,6 +409,11 @@ Public Sub CrownTrexisPaymentDue()
     ' Now: settle first, press Search, wait for the results (Search again
     ' if none come), and only then Export.
     drv.Wait 3000
+
+    ' 8 Nov: Search twice still gave no results - make sure "Search Only:
+    ' Policies" is chosen (not Quotes / nothing) and Status is All first.
+    CrownNotePage drv, "Trexis search setup: " & CrownMoreJs(drv, CrownTrexisSetupJs())
+    drv.Wait 1000
     ClickElement drv, "searchPolicyQuote", "ID"
 
     If Not CrownMoreWaitJs(drv, CrownTrexisResultsJs(), 30) Then
@@ -1920,7 +1925,7 @@ Private Function CrownNgSignIn(ByVal drv As ChromeDriver) As Boolean
     started = Now
     Do
         answer = CrownMoreJs(drv, CrownNgVisibleJs() & "return vis('txtUserID')?'user':(vis('Password')?'pass':" & _
-                                  "(document.getElementById('ctl00_lblInsName')||document.querySelector('a[href*=PolicySearch]')?'in':''));")
+                                  "(" & CrownNgSignedInJs() & "?'in':''));")
         If Len(answer) > 0 Then Exit Do
         If Len(CrownMoreJs(drv, CrownCodePageJs())) > 0 Then Exit Do
         drv.Wait 700
@@ -1931,20 +1936,32 @@ Private Function CrownNgSignIn(ByVal drv As ChromeDriver) As Boolean
         ' Clear first: Chrome fills the box in by itself, and the ID was typed on the end of it (2 Nov).
         EnterData drv, Keys, "txtUserID", wsInput.Range("USER_30").value, "ID", "", True
         ClickElement drv, "btnLogin", "ID"
-        If Not CrownMoreWaitJs(drv, CrownNgVisibleJs() & "return vis('Password')?'ok':'';", 45) Then
-            CrownNotePage drv, "National General sign-in: the password box never showed after the user ID"
-            CrownPayBox "National General took the user ID but never showed the password box. Nothing has been changed. " & _
+
+        ' 8 Nov: after the user ID National General may go straight to the
+        ' agent home page (it remembered this Chrome) - no password asked.
+        started = Now
+        answer = ""
+        Do
+            answer = CrownMoreJs(drv, CrownNgVisibleJs() & "return vis('Password')?'pass':(" & CrownNgSignedInJs() & "?'in':'');")
+            If Len(answer) > 0 Then Exit Do
+            If Len(CrownMoreJs(drv, CrownCodePageJs())) > 0 Then Exit Do
+            drv.Wait 700
+            DoEvents
+        Loop While (Now - started) * 86400 < 45
+
+        If Len(answer) = 0 And Len(CrownMoreJs(drv, CrownCodePageJs())) = 0 Then
+            CrownNotePage drv, "National General sign-in: neither the password box nor the home page showed after the user ID"
+            CrownPayBox "National General took the user ID but showed neither the password box nor its home page. Nothing has been changed. " & _
                    "The page is on the QuoteLook sheet.", vbExclamation, "Crown Superior"
             Exit Function
         End If
-        answer = "pass"
     End If
 
     If answer = "pass" Then
         EnterData drv, Keys, "Password", wsInput.Range("PASS_30").value, "ID", "", True
         ClickElement drv, "//button[contains(text(),'SIGN IN')]", "XPATH"
         drv.Wait 2500
-    ElseIf answer = "" And CrownPayUnattended Then
+    ElseIf answer = "" And CrownPayUnattended And Len(CrownMoreJs(drv, CrownCodePageJs())) = 0 Then
         ' Nobody to sign in by hand: say what the page was, and move on.
         CrownNotePage drv, "National General sign-in: no user ID or password box showed in 30 seconds"
         CrownPayBox "National General's sign-in page did not show its user ID or password box. Nothing has been changed. " & _
@@ -1966,6 +1983,25 @@ Private Function CrownNgSignIn(ByVal drv As ChromeDriver) As Boolean
 End Function
 
 
+' Ticks "Policies" under Search Only (by its label) and sets Status to All;
+' says what it found and did.
+Private Function CrownTrexisSetupJs() As String
+    CrownTrexisSetupJs = _
+        "var said=[];var ls=[].slice.call(document.querySelectorAll('label')).filter(function(l){return (l.innerText||'').trim()==='Policies';});" & _
+        "if(!ls.length){said.push('no Policies label');}else{var l=ls[0];" & _
+        "var r=l.control||l.querySelector('input')||(l.htmlFor?document.getElementById(l.htmlFor):null)||" & _
+        "(l.previousElementSibling&&l.previousElementSibling.tagName==='INPUT'?l.previousElementSibling:null);" & _
+        "if(r){said.push('Policies '+r.type+' was '+(r.checked?'on':'off')+' (id '+(r.id||'-')+', name '+(r.name||'-')+')');" & _
+        "if(!r.checked){r.click();if(!r.checked){l.click();}said.push('now '+(r.checked?'on':'still off'));}}" & _
+        "else{l.click();said.push('Policies label clicked (no box found)');}}" & _
+        "var all=[].slice.call(document.querySelectorAll('input[type=radio],input[type=checkbox]')).map(function(x){" & _
+        "return (x.id||x.name||'?')+'='+(x.checked?'on':'off');});said.push('choices: '+all.join(', '));" & _
+        "var st=document.getElementById('policyCenterTypeStatus');if(st){said.push('status was '+(st.options[st.selectedIndex]||{}).text);" & _
+        "if(st.selectedIndex!==0){st.selectedIndex=0;st.dispatchEvent(new Event('change',{bubbles:true}));said.push('set to All');}}" & _
+        "return said.join('; ');"
+End Function
+
+
 ' "ok" once Trexis's search has put results on the page: rows in a
 ' table, or pages to choose from in its page list.
 Private Function CrownTrexisResultsJs() As String
@@ -1973,6 +2009,15 @@ Private Function CrownTrexisResultsJs() As String
                            "var t=[].slice.call(document.querySelectorAll('tbody tr')).filter(function(r){" & _
                            "return r.getClientRects().length&&r.querySelectorAll('td').length>2;});" & _
                            "return t.length?'ok':'';"
+End Function
+
+
+' True (as a JS expression) on National General's signed-in pages: the
+' agent home has Log Out and the Find Customer box (QuoteLook, 8 Nov).
+Private Function CrownNgSignedInJs() As String
+    CrownNgSignedInJs = "(document.getElementById('ctl00_lblInsName')||document.getElementById('ctl00_lblLogOut')" & _
+                        "||document.getElementById('ctl00_MainContent_wgtMainMenuFindPolicy_txtSearchString')" & _
+                        "||document.querySelector('a[href*=PolicySearch]'))"
 End Function
 
 
