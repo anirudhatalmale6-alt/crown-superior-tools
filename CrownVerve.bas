@@ -67,7 +67,7 @@ Private Const VERVE_MOST_PAGES As Long = 6
 ' Returns a note for the RunLog. down/monthly are left empty when there
 ' is no price, and the note says why.
 Public Function CrownVerveQuote(ByRef down As String, ByRef monthly As String, _
-                                ByRef term As String) As String
+                                ByRef term As String, Optional ByVal keepOpen As Boolean = False) As String
     Dim drv As ChromeDriver
     Dim opened As Long
     Dim note As String
@@ -106,11 +106,14 @@ Public Function CrownVerveQuote(ByRef down As String, ByRef monthly As String, _
     Err.Clear
     On Error GoTo 0
 
-    ' Close the window so a batch does not leave one open per customer.
-    On Error Resume Next
-    drv.Quit
-    DrvCol.Remove DrvCol.Count
-    On Error GoTo 0
+    ' Close the window so a batch does not leave one open per customer
+    ' (left open when a person started it from the QuotePay sheet).
+    If Not keepOpen Then
+        On Error Resume Next
+        drv.Quit
+        DrvCol.Remove DrvCol.Count
+        On Error GoTo 0
+    End If
 
     CrownVerveQuote = note
 End Function
@@ -368,17 +371,61 @@ Private Function CrownVerveItemJs() As String
         "it.setAttribute('data-crown-item','1');return 'clicked '+it.innerText.trim();"
 End Function
 
-' The Verve RUN button on the sheets (macro FillVerve) becomes two buttons
-' side by side in the same place: "Verve (Trisura)" and "Verve (Benchmark)".
-' Safe to run again - it says what it found either way (2 Nov: the first
-' version gave him nothing to go on).
+
+' The QuotePay sheet's Verve button (8 Nov). His ScrapeVerveQuotePaymentttt
+' typed the whole quote into Verve's old pages (Verve 1.1, now closed - it
+' never chose Benchmark and every box id was the old one). This quotes on
+' Benchmark the way the website's quotes do, and writes the same row on
+' QuotePay: VERVE, name, email, phone, first due date, down payment,
+' installment. The Verve window is left open to look at.
+Public Sub CrownVerveQuotePay()
+    Dim arData As Variant, ws As Worksheet, nextRow As Long
+    Dim down As String, monthly As String, term As String, note As String
+
+    arData = GetData()
+    If IsEmpty(arData) Then
+        MsgBox "No Data found Please Import data in output sheet!", vbExclamation
+        Exit Sub
+    End If
+    If IsQuotePayRowsFull() Then Exit Sub
+
+    CrownVerveCompany = "Benchmark"
+    note = CrownVerveQuote(down, monthly, term, True)
+    CrownVerveCompany = ""
+
+    If Len(down) = 0 And Len(monthly) = 0 Then
+        MsgBox "No Verve price, so nothing was written on QuotePay." & vbCrLf & vbCrLf & note, vbExclamation, "Crown Superior"
+        Exit Sub
+    End If
+
+    Set ws = ThisWorkbook.Sheets("QuotePay")
+    nextRow = ws.Cells(ws.Rows.Count, "F").End(xlUp).Row + 1
+
+    ws.Cells(nextRow, "F").Value = "VERVE"
+    ws.Cells(nextRow, "G").Value = arData(1, colDriverFirstName1)
+    ws.Cells(nextRow, "H").Value = arData(1, colDriverLastName1)
+    ws.Cells(nextRow, "I").Value = arData(1, colDriverEmail1)
+    ws.Cells(nextRow, "J").Value = arData(1, colDriverPhone1)
+    ws.Cells(nextRow, "L").Value = CrownVerveFirstDue
+    ws.Cells(nextRow, "M").Value = down
+    ws.Cells(nextRow, "N").Value = monthly
+
+    MsgBox "Complete (Benchmark)." & vbCrLf & vbCrLf & note, vbInformation, "Crown Superior"
+End Sub
+
+
+' Points the tool's Verve buttons at Benchmark (8 Nov - only Benchmark
+' quotes now; Verve closed the Trisura line):
+'   - the Input sheet's Verve RUN (FillVerve, or the two Trisura/Benchmark
+'     halves from 2 Nov, joined back into one) -> FillVerveBenchmark
+'   - the QuotePay sheet's Verve button (ScrapeVerveQuotePaymentttt) ->
+'     CrownVerveQuotePay
+' Safe to run again - it says what it found either way.
 Public Sub CrownMakeVerveButtons()
     Dim ws As Worksheet, shp As Shape, nb As Shape
-    Dim act As String, found As String, done As Long, already As Long
-    Dim targets As Collection, t As Variant
-    Dim halves As Collection, merged As Long
+    Dim act As String, macroName As String, found As String, said As String
+    Dim halves As Collection, t As Variant
 
-    Set targets = New Collection
     Set halves = New Collection
 
     For Each ws In ThisWorkbook.Worksheets
@@ -387,20 +434,26 @@ Public Sub CrownMakeVerveButtons()
             On Error Resume Next
             act = shp.OnAction
             On Error GoTo 0
+            macroName = LCase$(Mid$(act, InStrRev(act, "!") + 1))
 
-            If InStr(1, act, "fillverve", vbTextCompare) > 0 Then
+            If InStr(1, macroName, "verve", vbTextCompare) > 0 Then
                 found = found & "   " & ws.Name & ": '" & shp.Name & "' runs " & Mid$(act, InStrRev(act, "!") + 1) & vbCrLf
-
-                If InStr(1, act, "FillVerveBenchmark", vbTextCompare) > 0 Then already = already + 1
-                If LCase$(Mid$(act, InStrRev(act, "!") + 1)) = "fillverve" Then targets.Add shp
-                If InStr(1, act, "FillVerveTrisura", vbTextCompare) > 0 Then halves.Add shp
             End If
+
+            Select Case macroName
+                Case "fillverve"
+                    shp.OnAction = "FillVerveBenchmark"
+                    said = said & "- " & ws.Name & ": the Verve RUN button now runs FillVerveBenchmark" & vbCrLf
+                Case "fillvervetrisura"
+                    halves.Add shp
+                Case "scrapevervequotepaymentttt"
+                    shp.OnAction = "CrownVerveQuotePay"
+                    said = said & "- " & ws.Name & ": the Verve button now quotes on Benchmark (CrownVerveQuotePay)" & vbCrLf
+            End Select
         Next shp
     Next ws
 
-    ' 8 Nov: only Benchmark quotes now - two halves become one "Verve" button
-    ' again (the Trisura half widened to the full width, the other half
-    ' removed), running FillVerveBenchmark.
+    ' The two halves of 2 Nov become one "Verve" button again.
     For Each t In halves
         Set shp = t
         Set nb = Nothing
@@ -415,33 +468,16 @@ Public Sub CrownMakeVerveButtons()
 
         shp.OnAction = "FillVerveBenchmark"
         CrownSetShapeText shp, "Verve"
-        merged = merged + 1
+        said = said & "- " & shp.Parent.Name & ": the two Verve halves are one Verve button again (Benchmark)" & vbCrLf
     Next t
 
-    If merged > 0 Then
-        MsgBox "Done: the Verve button is one button again and quotes on Benchmark." & vbCrLf & vbCrLf & _
-               "Press Ctrl+S to keep it.", vbInformation, "Crown Superior"
-        Exit Sub
-    End If
-
-    ' Benchmark only now: a plain FillVerve button stays one button and runs FillVerveBenchmark.
-    For Each t In targets
-        Set shp = t
-        shp.OnAction = "FillVerveBenchmark"
-        done = done + 1
-    Next t
-
-    If done > 0 Then
-        MsgBox "Done: the Verve RUN button now quotes on Benchmark." & vbCrLf & vbCrLf & _
-               "Press Ctrl+S to keep it.", vbInformation, "Crown Superior"
-    ElseIf already > 0 Then
-        MsgBox "The Verve (Benchmark) button is already there:" & vbCrLf & found, vbInformation, "Crown Superior"
+    If Len(said) > 0 Then
+        MsgBox "Done:" & vbCrLf & said & vbCrLf & "Press Ctrl+S to keep it.", vbInformation, "Crown Superior"
     ElseIf Len(found) > 0 Then
-        MsgBox "Found these but changed nothing:" & vbCrLf & found & vbCrLf & _
-               "Run FillVerveBenchmark from Alt+F8 for now, and send me a screenshot of this box.", vbExclamation, "Crown Superior"
+        MsgBox "Nothing needed changing - the Verve buttons:" & vbCrLf & found, vbInformation, "Crown Superior"
     Else
-        MsgBox "No button on any sheet runs FillVerve, so nothing was changed." & vbCrLf & _
-               "Run FillVerveBenchmark from Alt+F8 for now, and tell me which sheet the Verve button is on.", vbExclamation, "Crown Superior"
+        MsgBox "No button on any sheet runs a Verve macro, so nothing was changed." & vbCrLf & _
+               "Tell me which sheet the Verve button is on.", vbExclamation, "Crown Superior"
     End If
 End Sub
 
