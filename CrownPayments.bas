@@ -711,8 +711,28 @@ Private Function CrownVerveRests(ByVal d As Object, ByVal policyNo As String, By
 End Function
 
 ' Write it down (or refresh the date if it is already there).
+' Verve's own Policy Status line as a word for the website: "Policy is
+' Currently In-Force" = Active; cancelled / expired / non-renewed / lapsed
+' as such; anything else "" (not guessed).
+Private Function CrownVerveStatusWord(ByVal said As String) As String
+    said = LCase$(said)
+    If Len(said) = 0 Then Exit Function
+
+    If InStr(said, "in-force") > 0 Or InStr(said, "in force") > 0 Or InStr(said, "inforce") > 0 Then
+        CrownVerveStatusWord = "Active"
+    ElseIf InStr(said, "pending cancel") > 0 Then
+        CrownVerveStatusWord = "Pending Cancellation"
+    ElseIf InStr(said, "cancel") > 0 Then
+        CrownVerveStatusWord = "Cancelled"
+    ElseIf InStr(said, "expire") > 0 Or InStr(said, "non-renew") > 0 Or InStr(said, "nonrenew") > 0 Or InStr(said, "lapse") > 0 Then
+        CrownVerveStatusWord = "Expired"
+    End If
+End Function
+
+
 ' The term on Verve's Policy Info tab (the tab a policy opens on):
-' "Effective|Expiration" as Verve writes them, e.g. "07/15/2026|01/15/2027".
+' "Effective|Expiration|Policy Status" as Verve writes them, e.g.
+' "07/15/2026|01/15/2027|Policy is Currently In-Force".
 Private Function CrownVerveTermDates(ByVal drv As ChromeDriver) As String
     On Error Resume Next
     CrownVerveTermDates = CStr(drv.ExecuteScript( _
@@ -720,7 +740,9 @@ Private Function CrownVerveTermDates(ByVal drv As ChromeDriver) As String
         "var t=(c.innerText||'').replace(/\s+/g,' ').trim();" & _
         "if((t==='Effective'||t==='Expiration')&&!o[t]&&c.nextElementSibling&&c.getClientRects().length)" & _
         "o[t]=(c.nextElementSibling.innerText||'').trim();});" & _
-        "return (o.Effective||'')+'|'+(o.Expiration||'');"))
+        "var b=(document.body&&document.body.innerText||'').replace(/\s+/g,' ');" & _
+        "var m=/(Policy is (?:Currently )?[A-Za-z\- ]{3,40}?)(?= Policy Messages| Insured Info|$|\.)/i.exec(b);" & _
+        "return (o.Effective||'')+'|'+(o.Expiration||'')+'|'+(m?m[1].trim():'');"))
     On Error GoTo 0
 End Function
 
@@ -2314,6 +2336,7 @@ Public Sub CrownVervePaymentDue()
     Dim finished As Object, finishedWhy As String, rested As Long
     Dim renewals As Collection, sameNo As Object, madeCount As Long
     Dim termEff As String, termExp As String, termOpen As Boolean, noKey As String
+    Dim verveSays As String
     Dim siteEnds As Double
     Dim lookupAnswer As String
     Dim signedBackIn As Long
@@ -2475,6 +2498,7 @@ Public Sub CrownVervePaymentDue()
         ' seconds since 5 Nov, which is what stood the 4 Nov run still.)
 
         activity = ""
+        verveSays = ""
         dueAmount = ""
         dueDate = ""
         cancelDate = ""
@@ -2578,6 +2602,7 @@ Public Sub CrownVervePaymentDue()
             found = CrownVerveTermDates(drv)
             termEff = CrownPart(found, 0)
             termExp = CrownPart(found, 1)
+            verveSays = CrownVerveStatusWord(CrownPart(found, 2))
 
             ClickElement drv, VERVE_BILLING_TAB, "XPATH"
             drv.Wait 1000
@@ -2770,6 +2795,10 @@ Public Sub CrownVervePaymentDue()
             ' And never over a cancellation the statement itself shows.
             If Len(reported) > 0 And Len(stmtCancel) = 0 And Not CrownIsTransactionWord(reported) Then policyStatus = reported
 
+            ' 10 Nov: when the billing line gave no status, Verve's own Policy
+            ' Status line does ("Policy is Currently In-Force") - never a guess.
+            If Len(policyStatus) = 0 And Len(verveSays) > 0 Then policyStatus = verveSays
+
             ' The policy period on the website has ended (4 Nov). With no
             ' instalment coming at Verve it is over: Expired, whatever the
             ' report's word was. If Verve is still billing it, the period on
@@ -2788,7 +2817,7 @@ Public Sub CrownVervePaymentDue()
                                  ") - that term is already on the website as another record")
                 Else
                     renewals.Add Array(recordId, policyNo, termEff, termExp, dueAmount, dueDate, cancelDate, _
-                                       IIf(Len(policyStatus) > 0, policyStatus, "Active"), _
+                                       policyStatus, _
                                        Trim$(CStr(parts(4)) & " " & CStr(parts(5))), policyNo)
                     sameNo(noKey) = CrownUsDate(termExp)        ' so one run cannot offer it twice
                     note = Trim$(note & " RENEWED at Verve under the same number: new term " & termEff & " to " & termExp)
