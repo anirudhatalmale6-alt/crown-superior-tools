@@ -49,6 +49,9 @@ Public Sub CrownAssurancePaymentDue()
     Dim recordId As String, matchedOn As String, note As String
     Dim row As Long, done As Long, unmatched As Long, blank As Long, failed As Long
     Dim started As Date
+    Dim byId As Object, sitePart As Variant, siteEnds As Double
+    Dim renewals As Collection, aaNotes As Object, madeCount As Long
+    Dim term() As String, prior As String, renewed As Boolean
 
     Set wsInput = ThisWorkbook.Worksheets("Input")
 
@@ -58,6 +61,19 @@ Public Sub CrownAssurancePaymentDue()
         CrownPayBox "No Assurance America policies came back from the website.", vbExclamation, "Crown Superior"
         Exit Sub
     End If
+
+    ' 12 Nov (Tony, Kalima Chapman PGA2432591): Assurance America renews under
+    ' the same number with a suffix (-1, -2, -3). The website held the first
+    ' term only, and every run wrote the current term's figures onto it. Each
+    ' record's own policy period, to tell a renewal from the same term.
+    Set byId = CreateObject("Scripting.Dictionary")
+
+    For Each sitePart In CrownPolicyRows(AA_CARRIER)
+        byId(CStr(sitePart(0))) = sitePart
+    Next sitePart
+
+    Set renewals = New Collection
+    Set aaNotes = CreateObject("Scripting.Dictionary")
 
     Set ws = CrownSheet("AssurancePayments")
     ws.Cells.ClearContents
@@ -153,6 +169,8 @@ Public Sub CrownAssurancePaymentDue()
     For Each idx In picks
         dueAmount = "": dueDate = "": cancelDate = "": status = ""
         recordId = "": matchedOn = "": note = ""
+        renewed = False: prior = ""
+        term = Split("||", "|")
 
         ' Back on the list before reading the next row.
         started = Now
@@ -195,8 +213,29 @@ Public Sub CrownAssurancePaymentDue()
             dueAmount = CrownMoreMoney(parts(2))
             status = Trim$(parts(3))
             cancelDate = CrownMoreDate(parts(4))
+
+            ' The term this page is: number, from, to ("PGA2432591-3|10/28/26|04/28/27").
+            term = Split(CrownMoreJs(drv, CrownAaTermJs()) & "||", "|")
         Else
             note = "the policy did not open (" & answer & ")"
+        End If
+
+        recordId = CrownMoreMatch(byNumber, byName, AA_CARRIER, policyNo, insured, matchedOn, note, listed)
+
+        ' Renewed: Assurance America's term ends later than the website
+        ' record's. The terms in between are read off "Prior Term" while the
+        ' policy is still open.
+        If Len(recordId) > 0 And Len(term(2)) > 0 Then
+            If byId.Exists(recordId) Then
+                sitePart = byId(recordId)
+                siteEnds = 0
+                If UBound(sitePart) >= 14 Then siteEnds = CrownUsDate(CStr(sitePart(14)))
+
+                If siteEnds > 0 And CrownUsDate(term(2)) > siteEnds + 7 Then
+                    renewed = True
+                    prior = CrownAaPriorTerms(drv, siteEnds, term(0))
+                End If
+            End If
         End If
 
         ' Close it - his "x" button.
@@ -204,8 +243,6 @@ Public Sub CrownAssurancePaymentDue()
         ClickElement drv, "//button[.//span[text()='x']]", "XPATH"
         On Error GoTo 0
         drv.Wait 800
-
-        recordId = CrownMoreMatch(byNumber, byName, AA_CARRIER, policyNo, insured, matchedOn, note, listed)
 
         ws.Cells(row, 2).value = policyNo
         ws.Cells(row, 3).value = insured
@@ -224,6 +261,21 @@ Public Sub CrownAssurancePaymentDue()
             ws.Cells(row, 1).value = recordId
             ws.Cells(row, 10).value = Trim$("nothing read - left as it was. " & note)
             blank = blank + 1
+        ElseIf renewed Then
+            ' The website record is the old term: Expired, nothing due on it.
+            ' The current term becomes a record of its own (at the end).
+            ws.Cells(row, 1).value = recordId
+            answer = CrownMoreWrite(recordId, "", "", "", "Expired")
+
+            renewals.Add Array(recordId, IIf(Len(term(0)) > 0, term(0), policyNo), term(1), term(2), _
+                               dueAmount, dueDate, cancelDate, status, insured, CStr(sitePart(2)))
+            If Len(prior) > 0 Then aaNotes(recordId) = "Terms in between at Assurance America (not added as records): " & prior
+
+            ws.Cells(row, 10).value = "RENEWED - Assurance America's current term is " & term(0) & " " & term(1) & " to " & term(2) & _
+                "; this record (term ended " & CStr(sitePart(14)) & ") " & _
+                IIf(InStr(1, answer, """ok"":true", vbTextCompare) > 0, "set to Expired", "NOT set to Expired (" & answer & ")") & _
+                IIf(Len(prior) > 0, "; in between: " & prior, "")
+            done = done + 1
         Else
             ws.Cells(row, 1).value = recordId
             answer = CrownMoreWrite(recordId, dueAmount, dueDate, cancelDate, status)
@@ -249,9 +301,19 @@ Finish:
     drv.Quit
     On Error GoTo 0
 
+    ' The current terms of renewed policies, as records of their own.
+    If Not renewals Is Nothing Then madeCount = CrownMakeRenewals(renewals, ws, AA_CARRIER, 10, aaNotes)
+
     ws.Columns("A:J").AutoFit
     ThisWorkbook.Save
     ws.Activate
+
+    If Not renewals Is Nothing Then
+        If renewals.Count > 0 Then
+            CrownPayLog CrownPayCompany, renewals.Count & " Assurance America policies had renewed - " & madeCount & _
+                        " added as new records for the current term (the old ones set to Expired)."
+        End If
+    End If
 
     CrownPayBox done & " Assurance America policies written to the website." & vbCrLf & _
            unmatched & " could not be matched to a policy on the website." & vbCrLf & _
@@ -281,6 +343,62 @@ Private Function CrownAaRowJs() As String
         "function t(s){var e=r.querySelector(s);return e?(e.innerText||'').replace(/[|]/g,' ').replace(/\s+/g,' ').trim():'';}" & _
         "return 'ok|'+t('.cdk-column-InsuredName .mat-cell-link')+'|'+t('.cdk-column-PolicyIdentifier .mat-cell-link span');"
 End Function
+
+' "number|from|to" of the term the policy page shows - the number from the
+' term bar ("Prior Term  PGA2432591-3"), the dates from "Policy Period".
+Private Function CrownAaTermJs() As String
+    CrownAaTermJs = _
+        "var t=(document.body.innerText||'').replace(/ /g,' ');" & _
+        "var p=/Policy Period:?[\s\S]{0,300}?(\d{1,2}\/\d{1,2}\/\d{2,4})\s*-\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/i.exec(t)" & _
+        "||/(\d{1,2}\/\d{1,2}\/\d{2,4})\s*-\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/.exec(t);" & _
+        "var h=/(?:Prior Term|Next Term)\s*([A-Z]{2,5}\d{5,}(?:-\d+)?)/.exec(t)||/([A-Z]{2,5}\d{5,}(?:-\d+)?)\s*(?:Prior Term|Next Term)/.exec(t)" & _
+        "||/\b([A-Z]{2,5}\d{6,}(?:-\d+)?)\b/.exec(t);" & _
+        "return (h?h[1]:'')+'|'+(p?p[1]:'')+'|'+(p?p[2]:'');"
+End Function
+
+' Walks "Prior Term" back from the current term until the term the website
+' already has, and lists the ones in between: "PGA2432591-2 04/28/26 -
+' 10/28/26; PGA2432591-1 10/28/25 - 04/28/26". Never more than 8 steps.
+Private Function CrownAaPriorTerms(ByVal drv As Object, ByVal siteEnds As Double, ByVal currentNo As String) As String
+    Dim hops As Long, r As String, was As String, info() As String, started As Date, said As String
+
+    was = currentNo
+
+    For hops = 1 To 8
+        r = CrownMoreJs(drv, _
+            "var es=[].slice.call(document.querySelectorAll('a,button,span,div,li')).filter(function(x){" & _
+            "return x.getClientRects().length&&/^\W*Prior Term\W*$/.test((x.innerText||'').trim())&&" & _
+            "![].some.call(x.children,function(k){return /Prior Term/.test(k.innerText||'');});});" & _
+            "if(!es.length)return 'none';var o=document.querySelectorAll('[data-crown-prior]');" & _
+            "for(var i=0;i<o.length;i++)o[i].removeAttribute('data-crown-prior');" & _
+            "es[0].setAttribute('data-crown-prior','1');return 'ok';")
+        If r <> "ok" Then Exit For
+
+        On Error Resume Next
+        drv.FindElementByCss("[data-crown-prior]").Click
+        On Error GoTo 0
+
+        ' Until the page shows another term.
+        started = Now
+        Do
+            drv.Wait 700
+            DoEvents
+            info = Split(CrownMoreJs(drv, CrownAaTermJs()) & "||", "|")
+            If Len(info(0)) > 0 And info(0) <> was And Len(info(2)) > 0 Then Exit Do
+        Loop While (Now - started) * 86400 < 20
+
+        If info(0) = was Or Len(info(2)) = 0 Then Exit For
+
+        ' Back at the term the website already has: done.
+        If CrownUsDate(info(2)) <= siteEnds + 7 Then Exit For
+
+        said = said & IIf(Len(said) > 0, "; ", "") & info(0) & " " & info(1) & " - " & info(2)
+        was = info(0)
+    Next hops
+
+    CrownAaPriorTerms = said
+End Function
+
 
 ' "ok|due date|amount|status|cancel date" once the policy has loaded.
 Private Function CrownAaDetailJs() As String

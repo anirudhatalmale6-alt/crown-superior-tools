@@ -1546,9 +1546,10 @@ End Sub
 '
 ' They are listed and agreed to first. A policy record is not something
 ' to create behind someone's back.
-Private Function CrownMakeRenewals(ByVal renewals As Collection, ByVal ws As Object, _
-                                   Optional ByVal carrier As String = "United", _
-                                   Optional ByVal noteCol As Long = 11) As Long
+Public Function CrownMakeRenewals(ByVal renewals As Collection, ByVal ws As Object, _
+                                  Optional ByVal carrier As String = "United", _
+                                  Optional ByVal noteCol As Long = 11, _
+                                  Optional ByVal adminNotes As Object = Nothing) As Long
     Dim renewal As Variant
     Dim fields As Variant, values As Variant
     Dim listing As String, answer As String
@@ -1609,6 +1610,15 @@ Private Function CrownMakeRenewals(ByVal renewals As Collection, ByVal ws As Obj
             values = CrownWith(values, IIf(Len(CStr(renewal(11))) > 0, CStr(renewal(11)), "n/a"))
             fields = CrownWith(fields, "Payment_day")
             values = CrownWith(values, IIf(Len(CrownPayDayText(CStr(renewal(12)))) > 0, CrownPayDayText(CStr(renewal(12))), "n/a"))
+        End If
+
+        ' 12 Nov (Tony, Assurance America): the terms in between, which are not
+        ' added as records of their own, written into the new one's ADMIN NOTES.
+        If Not adminNotes Is Nothing Then
+            If adminNotes.Exists(CStr(renewal(0))) Then
+                fields = CrownWith(fields, "ADMIN NOTES")
+                values = CrownWith(values, CStr(adminNotes(CStr(renewal(0)))))
+            End If
         End If
 
         answer = CrownClone(CROWN_FORM_POLICY, CLng(renewal(0)), fields, values)
