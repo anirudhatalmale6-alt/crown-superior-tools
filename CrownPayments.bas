@@ -711,6 +711,75 @@ Private Function CrownVerveRests(ByVal d As Object, ByVal policyNo As String, By
 End Function
 
 ' Write it down (or refresh the date if it is already there).
+' The terms on Verve's Policy History tab that lie between the website's
+' term (ending siteEnds) and the current one (starting curEff): "GAF20054225
+' 05/22/2025 - 11/22/2025; ...". Opens the tab; "" when there are none or
+' the tab cannot be read - never a guess.
+Private Function CrownVerveTermsBetween(ByVal drv As ChromeDriver, ByVal siteEnds As Double, _
+                                        ByVal curEff As Double, ByVal policyNo As String) As String
+    Dim r As String, rows() As String, f() As String, i As Long, started As Date
+    Dim eff As Double, exp As Double, said As String, seen As String
+
+    If siteEnds = 0 Or curEff = 0 Then Exit Function
+
+    On Error Resume Next
+    r = CStr(drv.ExecuteScript( _
+        "var t=[].slice.call(document.querySelectorAll('a,span,li,div,td')).filter(function(x){" & _
+        "return x.getClientRects().length&&(x.innerText||'').trim()==='Policy History'&&" & _
+        "![].some.call(x.children,function(k){return (k.innerText||'').trim()==='Policy History';});});" & _
+        "if(!t.length)return 'none';var o=document.querySelectorAll('[data-crown-hist]');" & _
+        "for(var i=0;i<o.length;i++)o[i].removeAttribute('data-crown-hist');" & _
+        "t[0].setAttribute('data-crown-hist','1');return 'ok';"))
+    If r <> "ok" Then Exit Function
+
+    drv.FindElementByCss("[data-crown-hist]").Click
+    On Error GoTo 0
+
+    ' The history table: Type, T-Eff, T-Exp by their headings. "Previous
+    ' Policy History" ticked when it is not, so the earlier terms show.
+    started = Now
+    Do
+        drv.Wait 800
+        DoEvents
+        On Error Resume Next
+        r = CStr(drv.ExecuteScript( _
+            "var cb=[].slice.call(document.querySelectorAll('label,span,td')).filter(function(x){return /^Previous Policy History$/.test((x.innerText||'').trim());})[0];" & _
+            "if(cb){var box=cb.querySelector('input')||(cb.previousElementSibling&&cb.previousElementSibling.tagName==='INPUT'?cb.previousElementSibling:null)||document.getElementById(cb.htmlFor||'-');" & _
+            "if(box&&box.type==='checkbox'&&!box.checked&&!window.__crownHist){window.__crownHist=1;box.click();return 'wait';}}" & _
+            "var tb=[].slice.call(document.querySelectorAll('table')).filter(function(x){var h=(x.innerText||'');return /T-Eff/.test(h)&&/T-Exp/.test(h);});" & _
+            "if(!tb.length)return '';var rows=tb[tb.length-1].querySelectorAll('tr'),hi=-1,ei=-1,xi=-1,out=[];" & _
+            "for(var i=0;i<rows.length;i++){var c=[].map.call(rows[i].cells,function(z){return (z.innerText||'').replace(/\s+/g,' ').trim();});" & _
+            "if(hi<0){var a=c.indexOf('Type'),b=c.indexOf('T-Eff'),d=c.indexOf('T-Exp');if(b>=0&&d>=0){hi=a;ei=b;xi=d;}continue;}" & _
+            "if(c.length>Math.max(ei,xi))out.push((hi>=0?c[hi]:'')+'|'+c[ei]+'|'+c[xi]);}" & _
+            "return out.length?out.join('~'):'';"))
+        On Error GoTo 0
+        If Len(r) > 0 And r <> "wait" Then Exit Do
+    Loop While (Now - started) * 86400 < 20
+
+    If Len(r) = 0 Or r = "wait" Then Exit Function
+
+    rows = Split(r, "~")
+
+    For i = 0 To UBound(rows)
+        f = Split(rows(i) & "||", "|")
+        eff = CrownUsDate(Split(Trim$(f(1)) & " ", " ")(0))
+        exp = CrownUsDate(Split(Trim$(f(2)) & " ", " ")(0))
+
+        ' A term that starts on/after the website's term ended and ends by the
+        ' time the current one starts - each once, oldest first as Verve lists them.
+        If eff > 0 And exp > 0 And eff >= siteEnds - 7 And exp <= curEff + 7 And eff < curEff - 7 Then
+            If InStr(seen, "|" & CStr(eff) & "|") = 0 Then
+                seen = seen & "|" & CStr(eff) & "|"
+                said = said & IIf(Len(said) > 0, "; ", "") & policyNo & " " & Format$(CDate(eff), "mm/dd/yyyy") & _
+                       " - " & Format$(CDate(exp), "mm/dd/yyyy")
+            End If
+        End If
+    Next i
+
+    CrownVerveTermsBetween = said
+End Function
+
+
 ' Verve's own Policy Status line as a word for the website: "Policy is
 ' Currently In-Force" = Active; cancelled / expired / non-renewed / lapsed
 ' as such; anything else "" (not guessed).
@@ -2345,6 +2414,7 @@ Public Sub CrownVervePaymentDue()
     Dim endedOn As String, expiredSet As Long
     Dim finished As Object, finishedWhy As String, rested As Long
     Dim renewals As Collection, sameNo As Object, madeCount As Long
+    Dim verveNotes As Object, between As String
     Dim termEff As String, termExp As String, termOpen As Boolean, noKey As String
     Dim verveSays As String
     Dim siteEnds As Double
@@ -2384,6 +2454,7 @@ Public Sub CrownVervePaymentDue()
     ' Jan-Jul term. The latest policy period the website holds for each
     ' number, so a new term already on the site is not added a second time.
     Set renewals = New Collection
+    Set verveNotes = CreateObject("Scripting.Dictionary")
     Set sameNo = CreateObject("Scripting.Dictionary")
     sameNo.CompareMode = vbTextCompare
 
@@ -2829,6 +2900,15 @@ Public Sub CrownVervePaymentDue()
                     renewals.Add Array(recordId, policyNo, termEff, termExp, dueAmount, dueDate, cancelDate, _
                                        policyStatus, _
                                        Trim$(CStr(parts(4)) & " " & CStr(parts(5))), policyNo)
+
+                    ' 12 Nov (Tony: "each company ... can each have terms in-between"):
+                    ' the terms between the website's and the current one, off
+                    ' Verve's Policy History tab, into the new record's ADMIN NOTES.
+                    between = CrownVerveTermsBetween(drv, CrownUsDate(endedOn), CrownUsDate(termEff), policyNo)
+                    If Len(between) > 0 Then
+                        verveNotes(recordId) = "Terms in between at Verve (not added as records): " & between
+                        note = Trim$(note & " - in between: " & between)
+                    End If
                     sameNo(noKey) = CrownUsDate(termExp)        ' so one run cannot offer it twice
                     note = Trim$(note & " RENEWED at Verve under the same number: new term " & termEff & " to " & termExp)
                 End If
@@ -2931,7 +3011,7 @@ NextVerve:
     Next i
 
     ' New terms of same-number renewals, as records of their own (8 Nov).
-    madeCount = CrownMakeRenewals(renewals, ws, "Verve", 8)
+    madeCount = CrownMakeRenewals(renewals, ws, "Verve", 8, verveNotes)
 
     ws.Activate
 
