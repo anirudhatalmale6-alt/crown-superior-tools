@@ -1021,3 +1021,27 @@ Private Function CrownAutoPayBoxJs(ByVal wantOn As Boolean) As String
         "if(box.checked===want)return want?'already on':'already off';" & _
         "setTimeout(function(){box.click();},50);return want?'ticked':'unticked';"
 End Function
+
+
+' Years licensed for United's driver boxes (dbxLICM1-4). Tony, 10 Nov:
+' "number of years licensed = age - 16 ... if it cant do calculation ...
+' place 2" - it was always 5, which United refuses for a driver under 21
+' ("Years licensed cannot be greater than 4 for 19 years old driver").
+Public Function CrownYearsLicensed(ByVal dob As Variant) As String
+    Dim born As Date, age As Long, text As String
+
+    CrownYearsLicensed = "2"
+
+    If IsDate(dob) Then
+        born = CDate(dob)
+    Else
+        text = Replace(Trim$(CStr(dob)), " ", "")
+        If Not IsDate(text) Then Exit Function
+        born = CDate(text)
+    End If
+
+    age = Year(Date) - Year(born)
+    If DateSerial(Year(Date), Month(born), Day(born)) > Date Then age = age - 1
+
+    If age >= 16 And age <= 110 Then CrownYearsLicensed = CStr(age - 16)
+End Function
