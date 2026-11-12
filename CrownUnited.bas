@@ -645,9 +645,12 @@ End Function
 ' 12 Nov (Tony, Marjorie Pierre): the Edit Quote page comes back with a
 ' previous policy term filled in but the Previous Company Name list on
 ' "Select", and Quote then stops with "Please select previous company
-' name". The company is picked again first (the customer's answer, or
-' Other Non Standard - the same rule as the first page), and if United
-' still asks, it is picked and Quote pressed once more.
+' name". Tony: a previous customer has no previous insurance to add (no
+' discount when the previous company is the one quoting) - tick Override
+' and set Prev. Policy Term to No coverage. Only a customer who said they
+' have had insurance 6 months or more with another company gets that
+' company picked instead (company = "" otherwise). If United still asks,
+' it is fixed and Quote pressed once more.
 ' ---------------------------------------------------------------------
 Public Function CrownUnitedReviewToQuote(ByVal drv As Object, Optional ByVal company As String = "") As Boolean
     Dim answer As String
@@ -694,7 +697,7 @@ PressQuote:
         If CrownUnitedAskedCompany(drv) Then
             If retried Then Exit Function
             retried = True
-            CrownUnitedPriorCompany drv, company
+            CrownUnitedNoPrevCoverage drv
             drv.Wait 600
             GoTo PressQuote
         End If
@@ -714,7 +717,8 @@ PressQuote:
 End Function
 
 ' The Edit Quote page: a previous policy term chosen (anything but
-' "Select" / "No coverage") with no company picked - pick it.
+' "Select" / "No coverage") with no company picked. Another company the
+' customer named: picked. Otherwise: Override + No coverage.
 Private Sub CrownUnitedEditQuoteCompany(ByVal drv As Object, ByVal company As String)
     Dim answer As String
 
@@ -726,8 +730,60 @@ Private Sub CrownUnitedEditQuoteCompany(ByVal drv As Object, ByVal company As St
         "return (s.selectedIndex<=0||/^\s*select\s*$/i.test(sv))?'pick':'has '+sv;")
 
     CrownNoteBlocker "United Edit Quote page, previous company: " & answer
-    If answer = "pick" Then CrownUnitedPriorCompany drv, company
+    If answer <> "pick" Then Exit Sub
+
+    If Len(Trim$(company)) > 0 And InStr(1, company, "united", vbTextCompare) = 0 Then
+        CrownUnitedPriorCompany drv, company
+    Else
+        CrownUnitedNoPrevCoverage drv
+    End If
 End Sub
+
+' Tony, 12 Nov: "there is a check box for Override that needs to be
+' selected and previous insurance changed to no coverage". The term's
+' other choices stay greyed out until Override is ticked.
+Public Function CrownUnitedNoPrevCoverage(ByVal drv As Object) As Boolean
+    Dim answer As String
+
+    answer = CrownUnitedJs(drv, _
+        "var o=document.getElementById('agent_overwrite_prior');if(!o)return 'no Override box';" & _
+        "if(!o.checked)o.click();return o.checked?'ok':'Override did not tick';")
+    If answer <> "ok" Then
+        CrownNoteBlocker "United previous insurance, Override: " & answer
+        Exit Function
+    End If
+
+    drv.Wait 700
+
+    answer = CrownUnitedJs(drv, _
+        "var t=document.getElementById('prev_pol_term');if(!t)return 'no Prev. Policy Term list';" & _
+        "for(var i=0;i<t.options.length;i++){if(/no coverage/i.test(t.options[i].text)){" & _
+        "if(t.options[i].disabled)return 'No coverage still greyed out';" & _
+        "t.selectedIndex=i;t.dispatchEvent(new Event('change',{bubbles:true}));return 'ok';}}" & _
+        "return 'no No coverage choice';")
+
+    CrownNoteBlocker "United previous insurance: Override ticked, No coverage " & IIf(answer = "ok", "chosen", "NOT chosen (" & answer & ")")
+    CrownUnitedNoPrevCoverage = (answer = "ok")
+End Function
+
+' Any United quote page (first page or Edit Quote) that stopped on
+' "Please select previous company name": Override + No coverage and Quote
+' pressed again - at most twice a minute, so it can never go round and
+' round. True when Quote was pressed again.
+Public Function CrownUnitedRetryNoPrev(ByVal drv As Object) As Boolean
+    Static lastTry As Date, tries As Long
+
+    If (Now - lastTry) * 86400 > 60 Then tries = 0
+    If tries >= 2 Then Exit Function
+    tries = tries + 1
+    lastTry = Now
+
+    If Not CrownUnitedNoPrevCoverage(drv) Then Exit Function
+
+    drv.Wait 600
+    CrownUnitedRetryNoPrev = (CrownUnitedJs(drv, CrownUnitedButtonJs("quote")) = "clicked")
+    CrownNoteBlocker "United: Quote pressed again after No coverage - " & IIf(CrownUnitedRetryNoPrev, "ok", "no Quote button")
+End Function
 
 ' United's "Please select previous company name" pop-up: OK'd, and True.
 Private Function CrownUnitedAskedCompany(ByVal drv As Object) As Boolean

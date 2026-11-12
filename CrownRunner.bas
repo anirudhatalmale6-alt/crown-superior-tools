@@ -203,6 +203,8 @@ Public Sub CrownRunQuotes()
         ElseIf Not doUnited Then
             note = "United unticked on the website - Verve only"
         Else
+            ' 12 Nov: room made before counting, so a move never reads as "no row written".
+            CrownQuotePayMakeRoom
             before = CrownQuotePayRows()
 
             ' One customer's "not today" must never be read as the next one's.
@@ -410,6 +412,57 @@ Finished:
            "The RunLog sheet has a line for every one.", _
            vbInformation, "Crown Superior"
 End Sub
+
+
+' 12 Nov (Tony: "can quote pay sheet not have this limitation?"): when
+' QuotePay reaches row 29 its rows (F:N, from row 5) are added to the
+' bottom of a "QuotePay History" sheet - made the first time, with the
+' date and time they were moved in column A - and cleared off QuotePay,
+' which starts again at row 5. Nothing is deleted. True when there is room.
+Public Function CrownQuotePayMakeRoom() As Boolean
+    Dim ws As Worksheet, hist As Worksheet
+    Dim last As Long, hLast As Long, n As Long
+
+    On Error Resume Next
+    Set ws = ThisWorkbook.Sheets("QuotePay")
+    Set hist = ThisWorkbook.Sheets("QuotePay History")
+    On Error GoTo 0
+
+    If ws Is Nothing Then Exit Function
+    If Application.WorksheetFunction.CountA(ws.Range("F29:K29")) = 0 Then
+        CrownQuotePayMakeRoom = True
+        Exit Function
+    End If
+
+    last = ws.Cells(ws.Rows.Count, "F").End(xlUp).row
+    If last < 5 Then last = 30
+
+    On Error GoTo Failed
+
+    If hist Is Nothing Then
+        Set hist = ThisWorkbook.Sheets.Add(After:=ws)
+        hist.Name = "QuotePay History"
+        hist.Range("A1").value = "Moved"
+        hist.Range("B1:J1").value = ws.Range("F4:N4").value
+        hist.Rows(1).Font.Bold = True
+    End If
+
+    hLast = hist.Cells(hist.Rows.Count, "B").End(xlUp).row
+    If hLast < 1 Then hLast = 1
+    n = last - 4
+
+    hist.Range("B" & hLast + 1).Resize(n, 9).value = ws.Range("F5:N" & last).value
+    hist.Range("A" & hLast + 1).Resize(n, 1).value = Format$(Now, "mm/dd/yyyy hh:nn AM/PM")
+    hist.Range("H" & hLast + 1).Resize(n, 1).NumberFormat = "mm/dd/yyyy"   ' L, First Due Date
+
+    ws.Range("F5:N" & last).ClearContents
+
+    CrownQuotePayMakeRoom = True
+    Exit Function
+
+Failed:
+    CrownLastAlert = "QuotePay rows could not be moved to QuotePay History: " & Err.Description
+End Function
 
 
 ' How far down the QuotePay sheet has got.

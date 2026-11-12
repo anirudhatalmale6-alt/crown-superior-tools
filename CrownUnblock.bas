@@ -289,6 +289,16 @@ Public Function CrownHandleAlert(ByVal drv As Object) As Boolean
 
     CrownLastAlert = Trim$(text)
 
+    ' 12 Nov (Tony): a previous United customer, United asking for a
+    ' previous company there is none of - Override + No coverage, Quote again.
+    If InStr(1, text, "previous company", vbTextCompare) > 0 Then
+        If CrownUnitedRetryNoPrev(drv) Then
+            CrownHandleAlert = True
+
+            Exit Function
+        End If
+    End If
+
     ' The company turning the customer down: an answer, not a failure.
     ' Recorded as declined (staff only) and not tried again (26 Oct).
     If CrownIsRejection(text) Then
