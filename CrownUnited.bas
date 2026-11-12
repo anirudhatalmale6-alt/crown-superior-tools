@@ -641,10 +641,18 @@ End Function
 ' reports have been run - so: Edit Quote, OK "Photos required", Quote,
 ' OK "Agency fees ...", and the Quote Summary and Payment Options page
 ' comes up with the plans on it. True once that page is there.
+'
+' 12 Nov (Tony, Marjorie Pierre): the Edit Quote page comes back with a
+' previous policy term filled in but the Previous Company Name list on
+' "Select", and Quote then stops with "Please select previous company
+' name". The company is picked again first (the customer's answer, or
+' Other Non Standard - the same rule as the first page), and if United
+' still asks, it is picked and Quote pressed once more.
 ' ---------------------------------------------------------------------
-Public Function CrownUnitedReviewToQuote(ByVal drv As Object) As Boolean
+Public Function CrownUnitedReviewToQuote(ByVal drv As Object, Optional ByVal company As String = "") As Boolean
     Dim answer As String
     Dim started As Date
+    Dim retried As Boolean
 
     answer = CrownUnitedJs(drv, CrownUnitedButtonJs("edit quote"))
     CrownNoteBlocker "United Review Policy page, Edit Quote: " & answer
@@ -672,6 +680,9 @@ Public Function CrownUnitedReviewToQuote(ByVal drv As Object) As Boolean
     End If
 
     drv.Wait 600
+    CrownUnitedEditQuoteCompany drv, company
+
+PressQuote:
     answer = CrownUnitedJs(drv, CrownUnitedButtonJs("quote"))
     CrownNoteBlocker "United Edit Quote page, Quote: " & answer
     If answer <> "clicked" Then Exit Function
@@ -680,6 +691,13 @@ Public Function CrownUnitedReviewToQuote(ByVal drv As Object) As Boolean
     started = Now
     Do
         drv.Wait 800
+        If CrownUnitedAskedCompany(drv) Then
+            If retried Then Exit Function
+            retried = True
+            CrownUnitedPriorCompany drv, company
+            drv.Wait 600
+            GoTo PressQuote
+        End If
         If Not CrownHandleAlert(drv) Then Exit Function
 
         answer = CrownUnitedJs(drv, _
@@ -693,6 +711,41 @@ Public Function CrownUnitedReviewToQuote(ByVal drv As Object) As Boolean
     Loop While (Now - started) * 86400 < APPLY_WAIT_SECONDS
 
     CrownNotePage drv, "United: after Edit Quote > Quote the payment plans did not come up"
+End Function
+
+' The Edit Quote page: a previous policy term chosen (anything but
+' "Select" / "No coverage") with no company picked - pick it.
+Private Sub CrownUnitedEditQuoteCompany(ByVal drv As Object, ByVal company As String)
+    Dim answer As String
+
+    answer = CrownUnitedJs(drv, _
+        "var t=document.getElementById('prev_pol_term'),s=document.getElementById('txtPrevCompName');" & _
+        "if(!t||!s)return 'no boxes';var tv=(t.options[t.selectedIndex]||{}).text||'';" & _
+        "if(t.selectedIndex<=0||/no coverage/i.test(tv))return 'none: '+tv;" & _
+        "var sv=(s.options[s.selectedIndex]||{}).text||'';" & _
+        "return (s.selectedIndex<=0||/^\s*select\s*$/i.test(sv))?'pick':'has '+sv;")
+
+    CrownNoteBlocker "United Edit Quote page, previous company: " & answer
+    If answer = "pick" Then CrownUnitedPriorCompany drv, company
+End Sub
+
+' United's "Please select previous company name" pop-up: OK'd, and True.
+Private Function CrownUnitedAskedCompany(ByVal drv As Object) As Boolean
+    Dim text As String
+
+    On Error Resume Next
+    text = drv.SwitchToAlert.text
+    If Err.Number <> 0 Then
+        Err.Clear
+        Exit Function
+    End If
+
+    If InStr(1, text, "previous company", vbTextCompare) = 0 Then Exit Function
+
+    drv.SwitchToAlert.Accept
+    Err.Clear
+    CrownNoteBlocker "United Edit Quote page asked: " & Left$(Trim$(text), 120)
+    CrownUnitedAskedCompany = True
 End Function
 
 ' A script that clicks the button reading exactly that (any case), or says so.
