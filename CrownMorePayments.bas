@@ -1355,6 +1355,65 @@ Private Sub CrownCodeRow(ByVal ws As Object, ByVal row As Long, ByVal carrier As
     End If
 End Sub
 
+' The carrier's list of running policies was read in full: a policy the
+' website still calls active (Active, Reinstatement, New Business...) that
+' is not on it has ended - Cancelled, or Expired when its policy period is
+' over. Nothing is owed on it any more. The cancel date is left as it was:
+' the carrier no longer shows one to read, so it is for staff to check.
+' Many missing at once means the list was not all there (a page of it, a
+' filter) - then nothing is written and the sheet says so.
+Private Sub CrownCodeNotListed(ByVal ws As Object, ByRef row As Long, ByVal carrier As String, _
+                               ByVal listed As Object, ByVal listName As String, ByRef done As Long)
+    Dim parts As Variant, missing As Collection, running As Long
+    Dim word As String, answer As String, names As String
+
+    Set missing = New Collection
+
+    For Each parts In CrownPolicyRows(carrier)
+        If CrownActiveWord(CrownSiteStatus(parts)) Then
+            running = running + 1
+            If Not listed.Exists(CrownDigits(CStr(parts(2)))) Then missing.Add parts
+        End If
+    Next parts
+
+    If missing.Count = 0 Then Exit Sub
+
+    If missing.Count > 3 And missing.Count > running \ 4 Then
+        For Each parts In missing
+            names = names & IIf(Len(names) > 0, ", ", "") & Trim$(CStr(parts(4)) & " " & CStr(parts(5)))
+        Next parts
+        ws.Cells(row, 10).value = missing.Count & " of the " & running & " policies the website calls active were not on " & _
+            carrier & "'s " & listName & " list - too many to all have ended, so nothing was changed: " & names
+        row = row + 1
+        Exit Sub
+    End If
+
+    For Each parts In missing
+        word = IIf(Len(CrownPeriodEnded(parts)) > 0, "Expired", "Cancelled")
+
+        answer = CrownApiUpdate(CROWN_FORM_POLICY, CLng(parts(0)), _
+            Array("Status_", "Web_pymnt_due", "updated_due_date", "Update_due_dates", "Last_Updated"), _
+            Array(word, "", "", "Yes", Format$(Now, "mm-dd-yyyy hh:mm AM/PM")))
+
+        ws.Cells(row, 1).value = CStr(parts(0))
+        ws.Cells(row, 2).value = CStr(parts(2))
+        ws.Cells(row, 3).value = Trim$(CStr(parts(4)) & " " & CStr(parts(5)))
+        ws.Cells(row, 7).value = word
+        ws.Cells(row, 8).value = Now
+
+        If InStr(1, answer, """ok"":true", vbTextCompare) > 0 Then
+            ws.Cells(row, 10).value = "not on " & carrier & "'s " & listName & " list any more (the website said " & _
+                CrownSiteStatus(parts) & ") - written " & word & ". Cancel date left as it was - please check it."
+            done = done + 1
+        Else
+            ws.Cells(row, 10).value = "not on " & carrier & "'s " & listName & " list any more, but " & word & _
+                " was NOT written (" & IIf(Len(Trim$(answer)) = 0, "the website did not answer", answer) & ")"
+        End If
+
+        row = row + 1
+    Next parts
+End Sub
+
 Private Function CrownCodeSheet(ByVal sheetName As String, ByVal carrierShort As String) As Object
     Dim ws As Object
 
@@ -1707,7 +1766,7 @@ Public Sub CrownFirstAcceptancePaymentDue()
     Dim policyNo As String, insured As String, status As String, said As String, note As String
     Dim dueAmount As String, dueDate As String, cancelDate As String
     Dim done As Long, unmatched As Long, blank As Long, failed As Long
-    Dim started As Date
+    Dim started As Date, cutShort As Boolean
 
     Set wsInput = ThisWorkbook.Worksheets("Input")
 
@@ -1765,6 +1824,7 @@ Public Sub CrownFirstAcceptancePaymentDue()
         If Not CrownFaWaitX(drv, rowsXp & "[" & i & "]/td[2]//button", 30) Then
             ws.Cells(row, 10).value = "the search list did not come back for row " & i & " - stopped here"
             failed = failed + 1
+            cutShort = True
             Exit For
         End If
 
@@ -1800,6 +1860,11 @@ Public Sub CrownFirstAcceptancePaymentDue()
         CrownFaClick drv, "//button[.//span[text()='Open Search']]"
         DoEvents
     Next i
+
+    ' 12 Nov (Tony, Brittany Clark IAGA-17304): a policy that cancels for
+    ' good drops off the Active & Reinstatable list, so the run never saw it
+    ' again and the website kept "ACTIVE" from its last visit.
+    If n > 0 And Not cutShort Then CrownCodeNotListed ws, row, FA_CARRIER, listed, "Active & Reinstatable", done
 
 Finish:
     On Error Resume Next

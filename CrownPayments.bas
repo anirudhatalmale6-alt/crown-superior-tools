@@ -1117,11 +1117,14 @@ Private Sub CrownUaigFindRenewal(ByVal drv As ChromeDriver, ByVal ws As Object, 
                                  ByVal names As Object, ByVal renewals As Collection)
     Dim By As New Selenium.By
     Dim candidate As String, url As String, detail As String, billing As String
-    Dim dueAmt As String, said As String
+    Dim dueAmt As String, said As String, core As String
 
-    If Len(policyDigits) <> 6 Then Exit Sub    ' the only pattern United has shown so far
+    ' 12 Nov (Tony, Leonard Austin): the website held "GAI 000201511" - the
+    ' same 201511 with zeros in front - so this never looked for 10201511.
+    core = CrownNoLeadingZeros(policyDigits)
+    If Len(core) <> 6 Then Exit Sub    ' the only pattern United has shown so far
 
-    candidate = "10" & policyDigits
+    candidate = "10" & core
 
     If index.Exists(candidate) Then
         ws.Cells(row, 11).value = ws.Cells(row, 11).value & " Renewal " & candidate & _
@@ -1144,7 +1147,7 @@ Private Sub CrownUaigFindRenewal(ByVal drv As ChromeDriver, ByVal ws As Object, 
 
         If CrownDigits(CrownPart(detail, 0)) <> candidate Then
             said = " No renewal under " & candidate & "."
-        ElseIf CrownDigits(CrownPart(detail, 1)) <> policyDigits Then
+        ElseIf CrownNoLeadingZeros(CrownDigits(CrownPart(detail, 1))) <> core Then
             said = " " & CrownPart(detail, 0) & " exists but is not this policy's renewal (previous number " & _
                    CrownPart(detail, 1) & ") - left alone."
         Else
@@ -1166,6 +1169,17 @@ Private Sub CrownUaigFindRenewal(ByVal drv As ChromeDriver, ByVal ws As Object, 
     On Error GoTo 0
 End Sub
 
+
+' "000201511" -> "201511".
+Private Function CrownNoLeadingZeros(ByVal digits As String) As String
+    Dim i As Long
+
+    For i = 1 To Len(digits)
+        If Mid$(digits, i, 1) <> "0" Then Exit For
+    Next i
+
+    CrownNoLeadingZeros = Mid$(digits, i)
+End Function
 
 ' One of those six, or nothing.
 Private Function CrownPart(ByVal packed As String, ByVal which As Long) As String
@@ -1402,7 +1416,8 @@ ReadThePolicy:
             If Len(pageDigits) = 0 Then
                 wrongPage = True
                 note = Trim$(note & " the page did not say which policy it was - nothing written")
-            ElseIf pageDigits <> policyDigits And pageDigits <> chosenDigits Then
+            ElseIf CrownNoLeadingZeros(pageDigits) <> CrownNoLeadingZeros(policyDigits) _
+                   And CrownNoLeadingZeros(pageDigits) <> CrownNoLeadingZeros(chosenDigits) Then
                 wrongPage = True
                 note = Trim$(note & " United was still showing " & CrownPart(detail, 0) & _
                              " - nothing written")
@@ -1533,7 +1548,8 @@ ReadThePolicy:
         End If
 
         ' United has moved this policy on to a number we have never seen.
-        If Len(liveDigits) > 0 And liveDigits <> policyDigits Then
+        ' ("GAI 000201511" on the website is United's 201511 - not a new number.)
+        If Len(liveDigits) > 0 And CrownNoLeadingZeros(liveDigits) <> CrownNoLeadingZeros(policyDigits) Then
             If index.Exists(liveDigits) Then
                 ws.Cells(row, 11).value = ws.Cells(row, 11).value & _
                     " The newer term is already on the site as record " & index(liveDigits) & "."
@@ -1568,7 +1584,7 @@ ReadThePolicy:
 
         ' 27 Oct: an expired policy whose renewal United filed under a new
         ' number that the search above never shows (Jasmine Hodges).
-        If Not wrongPage And liveDigits = policyDigits _
+        If Not wrongPage And CrownNoLeadingZeros(liveDigits) = CrownNoLeadingZeros(policyDigits) _
            And InStr(1, policyStatus, "expire", vbTextCompare) > 0 Then
             CrownUaigFindRenewal drv, ws, row, recordId, siteNumber, policyDigits, index, names, renewals
         End If
