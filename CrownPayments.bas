@@ -1519,7 +1519,7 @@ ReadThePolicy:
             answer = CrownApiUpdate(CROWN_FORM_POLICY, CLng(recordId), _
                 Array("Web_pymnt_due", "updated_due_date", "updated_cancel_date", _
                       "Status_", "Update_due_dates", "Last_Updated", "Current_policy_no"), _
-                Array(dueAmount, CrownDate(dueDate), CrownDate(cancelDate), _
+                Array(dueAmount, CrownDate(dueDate), CrownLiveCancel(policyStatus, CrownDate(cancelDate)), _
                       policyStatus, "Yes", Format$(Now, "mm-dd-yyyy hh:mm AM/PM"), liveNumber))
 
             If InStr(1, answer, """ok"":true", vbTextCompare) > 0 Then
@@ -2964,7 +2964,7 @@ VerveWrite:
         Else
             names = Array("Web_pymnt_due", "updated_due_date", "updated_cancel_date", _
                           "Update_due_dates", "Last_Updated")
-            values = Array(dueAmount, CrownDate(dueDate), CrownDate(cancelDate), _
+            values = Array(dueAmount, CrownDate(dueDate), CrownLiveCancel(policyStatus, CrownDate(cancelDate)), _
                            "Yes", Format$(Now, "mm-dd-yyyy hh:mm AM/PM"))
 
             ' The status is only sent when the page actually said one.

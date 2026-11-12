@@ -969,10 +969,35 @@ End Function
 ' The same fields the United and Verve runs write.
 Private Function CrownMoreWrite(ByVal recordId As String, ByVal amount As String, ByVal dueDate As String, _
                                 ByVal cancelDate As String, ByVal status As String) As String
+    cancelDate = CrownLiveCancel(status, cancelDate)
+
     CrownMoreWrite = CrownApiUpdate(CROWN_FORM_POLICY, CLng(recordId), _
         Array("Web_pymnt_due", "updated_due_date", "updated_cancel_date", "Status_", _
               "Update_due_dates", "Last_Updated"), _
         Array(amount, dueDate, cancelDate, status, "Yes", Format$(Now, "mm-dd-yyyy hh:mm AM/PM")))
+End Function
+
+' 12 Nov (Tony, Emma Wise, National General): a cancel date that has
+' already gone by, on a policy the carrier calls Active, is an old notice
+' still printed on the page (her "Pending Underwriting Cancel" of 11 Sep),
+' not this policy's. It is written as blank. A pending cancellation
+' ("Active - Pending ... Cancel") or a date still to come is kept.
+Public Function CrownLiveCancel(ByVal status As String, ByVal cancelDate As String) As String
+    Dim s As String, m As Object, y As Long
+
+    CrownLiveCancel = cancelDate
+    s = LCase$(status)
+    If InStr(s, "active") = 0 Or InStr(s, "cancel") > 0 Or InStr(s, "pending") > 0 Then Exit Function
+
+    Set m = CreateObject("VBScript.RegExp")
+    m.Pattern = "^\s*(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})"
+    If Not m.Test(cancelDate) Then Exit Function
+
+    With m.Execute(cancelDate)(0)
+        y = CLng(.SubMatches(2))
+        If y < 100 Then y = y + 2000
+        If DateSerial(y, CLng(.SubMatches(0)), CLng(.SubMatches(1))) < Date Then CrownLiveCancel = ""
+    End With
 End Function
 
 ' "10/25/2026" or "(10/25/2026)" -> "10-25-2026". No date in it ("Not
