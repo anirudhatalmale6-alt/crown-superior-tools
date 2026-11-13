@@ -74,6 +74,7 @@ Public Sub CrownRunQuotes()
     Dim vDid As Long, vFailed As Long
     Dim carriers As Collection
     Dim doUnited As Boolean, doVerve As Boolean
+    Dim leftAlone As Boolean, stopWhy As String
     Dim priced As Boolean, vNote As String, gaveUp As Long
     Dim uNoPrice As Boolean, uNote As String
     Dim uDue As String
@@ -198,10 +199,17 @@ Public Sub CrownRunQuotes()
 
         loaded = CrownLoadQuoteById(CLng(ids(i)), who)
 
+        leftAlone = False
+
         If Not loaded Then
             note = "could not find that quote in the tool - run CrownFetchNewQuotes first"
         ElseIf Not doUnited Then
             note = "United unticked on the website - Verve only"
+        ElseIf Not CrownQuoteStillWanted(CLng(ids(i)), "united", stopWhy) Then
+            ' 13 Nov: left to staff (or United unticked) after the list was taken.
+            note = "United not started - " & stopWhy
+            doUnited = False
+            If InStr(1, stopWhy, "left to staff", vbTextCompare) > 0 Then leftAlone = True
         Else
             ' 12 Nov: room made before counting, so a move never reads as "no row written".
             CrownQuotePayMakeRoom
@@ -325,7 +333,19 @@ Public Sub CrownRunQuotes()
 
         ' Then Verve for the same customer - whatever United did. If United
         ' would not quote (the weather notice) this is the price they get.
-        If loaded And doVerve Then
+        If loaded And doVerve And Not leftAlone Then
+            If Not CrownQuoteStillWanted(CLng(ids(i)), "verve", stopWhy) Then
+                doVerve = False
+                If InStr(1, stopWhy, "left to staff", vbTextCompare) > 0 Then leftAlone = True
+                ws.Cells(row, 1).value = Now
+                ws.Cells(row, 2).value = ids(i)
+                ws.Cells(row, 3).value = who
+                ws.Cells(row, 6).value = "Verve not started - " & stopWhy
+                row = row + 1
+            End If
+        End If
+
+        If loaded And doVerve And Not leftAlone Then
             If CrownRunVerve(ws, row, CLng(ids(i)), who) Then
                 vDid = vDid + 1
                 inARow = 0
@@ -355,7 +375,7 @@ Public Sub CrownRunQuotes()
         ' the request off the list and shows it as "left to you" with
         ' this reason. (United's weather notice is not a failure - that
         ' already went to the website as the quote's note.)
-        If Not priced And Len(CrownLastStopReason) = 0 Then
+        If Not priced And Len(CrownLastStopReason) = 0 And Not leftAlone Then
             Dim why As String, told2 As String
 
             why = ""

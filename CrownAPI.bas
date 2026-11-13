@@ -366,6 +366,41 @@ Public Function CrownQuoteFail(ByVal submissionId As Long, ByVal reason As Strin
                    & "&reason=" & CrownEnc(Left$(reason, 150)))
 End Function
 
+' Is this request still ours to quote with this company? (13 Nov, Tony:
+' "I clicked leave for me ... but it still started".) The run takes its
+' list at the start; a request left to staff - or a company unticked - a
+' minute later is checked here before each company starts. No answer
+' from the website = carry on, as before.
+Public Function CrownQuoteStillWanted(ByVal submissionId As Long, ByVal company As String, _
+                                      ByRef why As String) As Boolean
+    Dim answer As String, at As Long, list As String
+
+    why = ""
+    CrownQuoteStillWanted = True
+
+    On Error Resume Next
+    answer = CrownPost(CrownBody("quotecheck") & "&id=" & submissionId)
+    On Error GoTo 0
+
+    If InStr(1, answer, """ok"":true", vbTextCompare) = 0 Then Exit Function
+
+    If InStr(1, answer, """left"":true", vbTextCompare) > 0 Then
+        why = "left to staff on the website"
+        CrownQuoteStillWanted = False
+        Exit Function
+    End If
+
+    at = InStr(1, answer, """carriers"":""", vbTextCompare)
+    If at > 0 Then
+        list = Mid$(answer, at + 12)
+        list = Left$(list, InStr(list & """", """") - 1)
+        If InStr(1, list, company, vbTextCompare) = 0 Then
+            why = company & " unticked on the website"
+            CrownQuoteStillWanted = False
+        End If
+    End If
+End Function
+
 ' Named CrownApiUpdate, not CrownUpdate: a function and a module with the
 ' same name confuse Excel ("Expected variable or procedure, not module").
 Public Function CrownApiUpdate(ByVal formId As Long, ByVal recordId As Long, _
