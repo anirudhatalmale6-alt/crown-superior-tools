@@ -780,6 +780,53 @@ Private Function CrownVerveTermsBetween(ByVal drv As ChromeDriver, ByVal siteEnd
 End Function
 
 
+' The newest term on Verve's Policy History tab, as "effective|expiration"
+' ("" when the tab cannot be read). Same table CrownVerveTermsBetween reads.
+Private Function CrownVerveLatestTerm(ByVal drv As ChromeDriver) As String
+    Dim r As String, rows() As String, f() As String, i As Long, started As Date
+    Dim best As Double, exp As Double
+
+    On Error Resume Next
+    r = CStr(drv.ExecuteScript( _
+        "var t=[].slice.call(document.querySelectorAll('a,span,li,div,td')).filter(function(x){" & _
+        "return x.getClientRects().length&&(x.innerText||'').trim()==='Policy History'&&" & _
+        "![].some.call(x.children,function(k){return (k.innerText||'').trim()==='Policy History';});});" & _
+        "if(!t.length)return 'none';t[0].click();return 'ok';"))
+    On Error GoTo 0
+    If r <> "ok" Then Exit Function
+
+    started = Now
+    Do
+        drv.Wait 800
+        DoEvents
+        On Error Resume Next
+        r = CStr(drv.ExecuteScript( _
+            "var tb=[].slice.call(document.querySelectorAll('table')).filter(function(x){var h=(x.innerText||'');return /T-Eff/.test(h)&&/T-Exp/.test(h);});" & _
+            "if(!tb.length)return '';var rows=tb[tb.length-1].querySelectorAll('tr'),ei=-1,xi=-1,out=[];" & _
+            "for(var i=0;i<rows.length;i++){var c=[].map.call(rows[i].cells,function(z){return (z.innerText||'').replace(/\s+/g,' ').trim();});" & _
+            "if(ei<0){var b=c.indexOf('T-Eff'),d=c.indexOf('T-Exp');if(b>=0&&d>=0){ei=b;xi=d;}continue;}" & _
+            "if(c.length>Math.max(ei,xi))out.push(c[ei]+'|'+c[xi]);}" & _
+            "return out.join('~');"))
+        On Error GoTo 0
+        If Len(r) > 0 Then Exit Do
+    Loop While (Now - started) * 86400 < 15
+
+    If Len(r) = 0 Then Exit Function
+
+    rows = Split(r, "~")
+
+    For i = 0 To UBound(rows)
+        f = Split(rows(i) & "|", "|")
+        exp = CrownUsDate(Split(Trim$(f(1)) & " ", " ")(0))
+
+        If exp > best Then
+            best = exp
+            CrownVerveLatestTerm = Split(Trim$(f(0)) & " ", " ")(0) & "|" & Split(Trim$(f(1)) & " ", " ")(0)
+        End If
+    Next i
+End Function
+
+
 ' Verve's own Policy Status line as a word for the website: "Policy is
 ' Currently In-Force" = Active; cancelled / expired / non-renewed / lapsed
 ' as such; anything else "" (not guessed).
@@ -1637,7 +1684,7 @@ Public Function CrownMakeRenewals(ByVal renewals As Collection, ByVal ws As Obje
                                   Optional ByVal adminNotes As Object = Nothing) As Long
     Dim renewal As Variant
     Dim fields As Variant, values As Variant
-    Dim listing As String, answer As String
+    Dim listing As String, answer As String, noteText As String
     Dim i As Long, made As Long
 
     If renewals.Count = 0 Then Exit Function
@@ -1699,12 +1746,16 @@ Public Function CrownMakeRenewals(ByVal renewals As Collection, ByVal ws As Obje
 
         ' 12 Nov (Tony, Assurance America): the terms in between, which are not
         ' added as records of their own, written into the new one's ADMIN NOTES.
+        ' 16 Nov (Tony, Jazmine Hodges: renewed married with her spouse
+        ' excluded, the copy said single): drivers and vehicles come from the
+        ' old term, so the note says to check them.
+        noteText = "Renewal made by the tool from record " & CStr(renewal(0)) & _
+                   " - drivers, vehicles and marital status are copied from the previous term: check them against " & carrier & "."
         If Not adminNotes Is Nothing Then
-            If adminNotes.Exists(CStr(renewal(0))) Then
-                fields = CrownWith(fields, "ADMIN NOTES")
-                values = CrownWith(values, CStr(adminNotes(CStr(renewal(0)))))
-            End If
+            If adminNotes.Exists(CStr(renewal(0))) Then noteText = noteText & " " & CStr(adminNotes(CStr(renewal(0))))
         End If
+        fields = CrownWith(fields, "ADMIN NOTES")
+        values = CrownWith(values, noteText)
 
         answer = CrownClone(CROWN_FORM_POLICY, CLng(renewal(0)), fields, values)
 
@@ -2430,7 +2481,7 @@ Public Sub CrownVervePaymentDue()
     Dim endedOn As String, expiredSet As Long
     Dim finished As Object, finishedWhy As String, rested As Long
     Dim renewals As Collection, sameNo As Object, madeCount As Long
-    Dim verveNotes As Object, between As String
+    Dim verveNotes As Object, between As String, tries As Long
     Dim termEff As String, termExp As String, termOpen As Boolean, noKey As String
     Dim verveSays As String
     Dim siteEnds As Double
@@ -2697,6 +2748,15 @@ Public Sub CrownVervePaymentDue()
             termEff = ""
             termExp = ""
             found = CrownVerveTermDates(drv)
+
+            ' 16 Nov (Tony, Joyee Myers): the dates can draw a moment after the
+            ' tabs - read again for up to 5 seconds before going on without them.
+            For tries = 1 To 5
+                If CrownUsDate(CrownPart(found, 1)) > 0 Then Exit For
+                drv.Wait 1000
+                found = CrownVerveTermDates(drv)
+            Next tries
+
             termEff = CrownPart(found, 0)
             termExp = CrownPart(found, 1)
             verveSays = CrownVerveStatusWord(CrownPart(found, 2))
@@ -2902,6 +2962,19 @@ Public Sub CrownVervePaymentDue()
             ' the website is the thing to check - said, not changed.
             endedOn = CrownPeriodEnded(parts)
 
+            ' 16 Nov (Tony, Joyee Myers GAF20079256): the period on the website
+            ' has ended and Policy Info gave no later term - Verve's Policy
+            ' History tab is asked for the newest term before calling it Expired.
+            If Len(endedOn) > 0 And CrownUsDate(termExp) <= CrownUsDate(endedOn) + 7 Then
+                found = CrownVerveLatestTerm(drv)
+
+                If CrownUsDate(CrownPart(found, 1)) > CrownUsDate(endedOn) + 7 Then
+                    termEff = CrownPart(found, 0)
+                    termExp = CrownPart(found, 1)
+                    note = Trim$(note & " (term read off Policy History)")
+                End If
+            End If
+
             ' 8 Nov: unless Verve's term ends later than this record's - it
             ' renewed under the same number. This record is the old term
             ' (Expired, nothing due on it); the new term gets a record of its
@@ -2948,7 +3021,8 @@ Public Sub CrownVervePaymentDue()
                                  " but Verve still bills it - check the period on the website")
                 ElseIf Len(policyStatus) = 0 Or CrownActiveWord(policyStatus) Then
                     policyStatus = "Expired"
-                    note = Trim$(note & " policy period ended " & endedOn & " and nothing is due at Verve - Expired")
+                    note = Trim$(note & " policy period ended " & endedOn & " and nothing is due at Verve - Expired" & _
+                                 IIf(Len(termExp) > 0, " (Verve's term: " & termEff & " to " & termExp & ")", " (Verve showed no term dates)"))
                     expiredSet = expiredSet + 1
                 End If
             End If
