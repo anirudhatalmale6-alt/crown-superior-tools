@@ -39,9 +39,12 @@ Public CrownAutoOn As Boolean
 ' it had the wrong information"): while somebody is working on the tool by
 ' hand, automatic quoting waits. Hand work = the Input sheet changed by
 ' anyone but the runner, or a quote button pressed by hand. It waits until
-' nothing has changed for this long.
-Private Const AUTO_HOLD_MINUTES As Long = 15
+' nothing has changed for this long - or until staff ask for a quote on the
+' website (Quote again, or a quote request sent while signed in): that is
+' "go now" (Tony, 17 Nov: "15 minutes is too long").
+Private Const AUTO_HOLD_MINUTES As Long = 10
 Private CrownAutoPauseUntil As Date
+Private CrownAutoPauseFrom As Date
 Private CrownAutoLastPrint As String
 
 ' The switch as kept in the workbook - survives Reset and reopening.
@@ -187,6 +190,7 @@ End Sub
 ' A quote button pressed by hand: automatic quoting waits AUTO_HOLD_MINUTES.
 Public Sub CrownAutoHoldOff()
     If CrownAutoMode Then Exit Sub              ' the runner itself pressing it
+    CrownAutoPauseFrom = Now
     CrownAutoPauseUntil = Now + AUTO_HOLD_MINUTES / 1440#
 End Sub
 
@@ -201,10 +205,38 @@ Private Function CrownAutoHandWork() As Boolean
         CrownAutoLastPrint = fp             ' first look after starting: nothing to compare with
     ElseIf fp <> CrownAutoLastPrint Then
         CrownAutoLastPrint = fp
+        CrownAutoPauseFrom = Now
         CrownAutoPauseUntil = Now + AUTO_HOLD_MINUTES / 1440#
     End If
 
-    CrownAutoHandWork = (Now < CrownAutoPauseUntil)
+    If Now >= CrownAutoPauseUntil Then Exit Function
+
+    ' Staff asked for a quote on the website since the wait began: go now.
+    If CrownAutoStaffAskedSince(CrownAutoPauseFrom) Then
+        CrownAutoPauseUntil = 0
+        CrownAutoNote "a quote was asked for on the website (Quote again / sent by staff) - not waiting any longer"
+        Exit Function
+    End If
+
+    CrownAutoHandWork = True
+End Function
+
+' Did staff press Quote again, or send a quote request while signed in,
+' after this moment? The website answers how many seconds ago that was.
+Private Function CrownAutoStaffAskedSince(ByVal since As Date) As Boolean
+    Dim answer As String, at As Long, age As Double
+
+    On Error Resume Next
+    answer = CrownPost(CrownBody("staffasked"))
+    On Error GoTo 0
+
+    at = InStr(1, answer, """age"":", vbTextCompare)
+    If at = 0 Then Exit Function
+
+    age = Val(Mid$(answer, at + 6))
+    If age < 0 Then Exit Function
+
+    CrownAutoStaffAskedSince = (age < (Now - since) * 86400# - 5)
 End Function
 
 ' Everything typed on the Input sheet's working area, as one string.
