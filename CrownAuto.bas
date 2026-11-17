@@ -35,6 +35,15 @@ Private Const AUTO_EVERY_MINUTES As Long = 5
 Private CrownAutoNextRun As Date
 Public CrownAutoOn As Boolean
 
+' 17 Nov (Tony: "interrupting the quote I was doing instead of waiting and
+' it had the wrong information"): while somebody is working on the tool by
+' hand, automatic quoting waits. Hand work = the Input sheet changed by
+' anyone but the runner, or a quote button pressed by hand. It waits until
+' nothing has changed for this long.
+Private Const AUTO_HOLD_MINUTES As Long = 15
+Private CrownAutoPauseUntil As Date
+Private CrownAutoLastPrint As String
+
 ' The switch as kept in the workbook - survives Reset and reopening.
 Private Const AUTO_NAME As String = "CrownAutoQuoting"
 
@@ -135,6 +144,19 @@ Public Sub CrownAutoTick(Optional ByVal chain As String = "")
         CrownAutoOn = True
     End If
 
+    ' Somebody is working on the tool by hand: wait, and say so.
+    If CrownAutoHandWork() Then
+        On Error Resume Next
+        CrownPing                               ' the website still sees the tool is on
+        Err.Clear
+        On Error GoTo 0
+
+        CrownAutoNote "waiting - the tool is being used by hand (Input sheet changed or a quote button pressed); " & _
+                      "carries on " & AUTO_HOLD_MINUTES & " minutes after the last change, from " & Format$(CrownAutoPauseUntil, "h:nn AM/PM")
+        If CrownAutoOn Then CrownAutoSchedule AUTO_EVERY_MINUTES
+        Exit Sub
+    End If
+
     CrownAutoMode = True
 
     On Error Resume Next
@@ -146,16 +168,67 @@ Public Sub CrownAutoTick(Optional ByVal chain As String = "")
     CrownAutoMode = False
     CrownUnattended = False
 
+
     ' A payment run that was due and never started is started now (3 Nov).
     On Error Resume Next
     CrownPayWatch
     Err.Clear
     On Error GoTo 0
 
+    ' What the runs left on the Input sheet is not hand work.
+    CrownAutoLastPrint = CrownInputPrint()
+
     ' The next one is booked after this one has finished, so a long batch
     ' can never have a second run start on top of it.
     If CrownAutoOn Then CrownAutoSchedule AUTO_EVERY_MINUTES
 End Sub
+
+
+' A quote button pressed by hand: automatic quoting waits AUTO_HOLD_MINUTES.
+Public Sub CrownAutoHoldOff()
+    If CrownAutoMode Then Exit Sub              ' the runner itself pressing it
+    CrownAutoPauseUntil = Now + AUTO_HOLD_MINUTES / 1440#
+End Sub
+
+' True while hand work is going on: the Input sheet is not as the runner
+' (or the last look) left it, or a quote button was pressed by hand lately.
+Private Function CrownAutoHandWork() As Boolean
+    Dim fp As String
+
+    fp = CrownInputPrint()
+
+    If Len(CrownAutoLastPrint) = 0 Then
+        CrownAutoLastPrint = fp             ' first look after starting: nothing to compare with
+    ElseIf fp <> CrownAutoLastPrint Then
+        CrownAutoLastPrint = fp
+        CrownAutoPauseUntil = Now + AUTO_HOLD_MINUTES / 1440#
+    End If
+
+    CrownAutoHandWork = (Now < CrownAutoPauseUntil)
+End Function
+
+' Everything typed on the Input sheet's working area, as one string.
+Private Function CrownInputPrint() As String
+    Dim v As Variant, r As Long, c As Long, out As String
+
+    On Error Resume Next
+    v = ThisWorkbook.Worksheets("Input").Range("A1:AD80").Formula   ' formulas as written, so a =TODAY() or =NOW() cell never looks like hand work
+    If Err.Number <> 0 Then
+        Err.Clear
+        Exit Function
+    End If
+    On Error GoTo 0
+
+    For r = 1 To UBound(v, 1)
+        For c = 1 To UBound(v, 2)
+            If Not IsError(v(r, c)) Then
+                If Len(CStr(v(r, c))) > 0 Then out = out & r & "," & c & "=" & CStr(v(r, c)) & "|"
+            End If
+        Next c
+    Next r
+
+    CrownInputPrint = out
+End Function
 
 
 Private Sub CrownAutoSchedule(ByVal minutes As Long)

@@ -126,12 +126,14 @@ End Function
 ' in progress, please see Verve 1.2"), so the Trisura half of the button
 ' now quotes Benchmark as well. Whichever half is pressed, it is Benchmark.
 Public Sub FillVerveTrisura()
+    CrownAutoHoldOff                            ' 17 Nov: automatic quoting waits while this is done by hand
     CrownVerveCompany = "Benchmark"
     FillVerve
     CrownVerveCompany = ""
 End Sub
 
 Public Sub FillVerveBenchmark()
+    CrownAutoHoldOff                            ' 17 Nov: automatic quoting waits while this is done by hand
     CrownVerveCompany = "Benchmark"
     FillVerve
     CrownVerveCompany = ""
@@ -381,6 +383,8 @@ End Function
 Public Sub CrownVerveQuotePay()
     Dim arData As Variant, ws As Worksheet, nextRow As Long
     Dim down As String, monthly As String, term As String, note As String
+
+    CrownAutoHoldOff                            ' 17 Nov: automatic quoting waits while this is done by hand
 
     arData = GetData()
     If IsEmpty(arData) Then
