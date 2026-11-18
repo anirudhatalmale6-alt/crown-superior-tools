@@ -499,12 +499,28 @@ Private Sub CrownSetShapeText(ByVal shp As Shape, ByVal text As String)
 End Sub
 
 
+' Verve's own error lines on the page now: required boxes, red messages,
+' an open message panel. "" when there are none.
+Private Function CrownVervePageErrors(ByVal drv As ChromeDriver) As String
+    On Error Resume Next
+    CrownVervePageErrors = CStr(drv.ExecuteScript( _
+        "function t(x){return (x||'').replace(/\s+/g,' ').trim();}var out=[];" & _
+        "[].forEach.call(document.querySelectorAll('.dxeErrorCell,.dxeErrorFrame td,[class*=""rror""],[class*=""alidation""],.dxpc-content,.dxpcLite .dxpc-content'),function(e){" & _
+        "if(!e.getClientRects().length)return;var s=t(e.innerText);if(s&&s.length<200&&out.indexOf(s)<0)out.push(s);});" & _
+        "[].forEach.call(document.querySelectorAll('span,div,td,li'),function(e){if(out.length>5||!e.getClientRects().length||e.children.length)return;" & _
+        "var c=getComputedStyle(e).color;var s=t(e.innerText);if(s&&s.length<160&&/rgb\(2[0-9][0-9], ?[0-9]{1,2}, ?[0-9]{1,2}\)/.test(c)&&out.indexOf(s)<0)out.push(s);});" & _
+        "return out.slice(0,4).join(' / ');"))
+    If Err.Number <> 0 Then CrownVervePageErrors = ""
+    On Error GoTo 0
+End Function
+
+
 ' From the Coverages page to a price.
 Private Function CrownVerveFinish(ByVal drv As ChromeDriver, ByRef down As String, _
                                   ByRef monthly As String, ByRef term As String) As String
     Dim page As String, was As String
     Dim pages As Long, same As Long
-    Dim popup As String
+    Dim popup As String, said As String
     Dim planRetried As Boolean
 
     page = CrownVervePageText(drv)
@@ -513,10 +529,16 @@ Private Function CrownVerveFinish(ByVal drv As ChromeDriver, ByRef down As Strin
         ' FillVerve stopped somewhere earlier. Whatever it saw is the reason.
         CrownNotePage drv, "Verve: FillVerve did not reach the Coverages page"
 
-        If Len(CrownLastAlert) > 0 Then
+        ' 18 Nov (Tony: "it didn't tell me the reason"): the alert was often
+        ' just "Verve:" - the page's own error lines say what it wanted.
+        said = CrownVervePageErrors(drv)
+
+        If Len(said) > 0 Then
+            CrownVerveFinish = "Verve: stopped before Coverages - " & Left$(said, 200)
+        ElseIf Len(Replace(Replace(CrownLastAlert, "Verve", ""), ":", "")) > 3 Then
             CrownVerveFinish = "Verve: stopped before Coverages - " & Left$(CrownLastAlert, 160)
         Else
-            CrownVerveFinish = "Verve: stopped before the Coverages page - what was on screen is on the QuoteLook sheet"
+            CrownVerveFinish = "Verve: stopped before the Coverages page (Verve gave no reason on screen) - the page is on the QuoteLook sheet"
         End If
 
         Exit Function

@@ -289,6 +289,15 @@ Public Function CrownHandleAlert(ByVal drv As Object) As Boolean
 
     CrownLastAlert = Trim$(text)
 
+    ' 18 Nov (Tony, Mariah Ryan): "Please select city." - the city chosen, Quote again.
+    If InStr(1, text, "select city", vbTextCompare) > 0 Then
+        If CrownUnitedRetryCity(drv) Then
+            CrownHandleAlert = True
+
+            Exit Function
+        End If
+    End If
+
     ' 12 Nov (Tony): a previous United customer, United asking for a
     ' previous company there is none of - Override + No coverage, Quote again.
     If InStr(1, text, "previous company", vbTextCompare) > 0 Then

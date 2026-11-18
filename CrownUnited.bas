@@ -804,6 +804,50 @@ Private Function CrownUnitedAskedCompany(ByVal drv As Object) As Boolean
     CrownUnitedAskedCompany = True
 End Function
 
+' 18 Nov (Tony, Mariah Ryan): a ZIP code with more than one city - United
+' stops with "Please select city." The city box (the one under the City
+' heading) gets the customer's city from the Input sheet, or the only /
+' first city it offers, and Quote is pressed again. At most twice in ten
+' minutes. True when Quote was pressed again.
+Public Function CrownUnitedRetryCity(ByVal drv As Object) As Boolean
+    Static lastTry As Date, tries As Long
+    Dim city As String, answer As String
+
+    If (Now - lastTry) * 86400 > 600 Then tries = 0
+    If tries >= 2 Then Exit Function
+    tries = tries + 1
+    lastTry = Now
+
+    city = CrownInputCity()
+
+    answer = CrownUnitedJs(drv, _
+        "function t(x){return (x||'').replace(/\s+/g,' ').trim();}" & _
+        "var lab=[].slice.call(document.querySelectorAll('td,label')).filter(function(e){return t(e.innerText).toLowerCase()==='city';})[0];" & _
+        "if(!lab)return 'no City heading';var cell=lab.closest('td')||lab;var tr=cell.parentNode,idx=[].indexOf.call(tr.children,cell);" & _
+        "var next=tr.nextElementSibling,s=null;while(next&&!s){var c=next.children[idx];s=c?c.querySelector('select'):null;next=s?next:next.nextElementSibling;}" & _
+        "if(!s)return 'no city box';var want=t(arguments[0]).toLowerCase(),pick=-1,real=[];" & _
+        "for(var i=0;i<s.options.length;i++){var o=t(s.options[i].text);if(!o||/^select/i.test(o))continue;real.push(i);if(want&&o.toLowerCase()===want)pick=i;}" & _
+        "if(pick<0&&real.length)pick=real[0];if(pick<0)return 'the city box offers nothing';" & _
+        "s.selectedIndex=pick;s.dispatchEvent(new Event('change',{bubbles:true}));return 'chose '+t(s.options[pick].text);", _
+        IIf(Len(city) = 0, " ", city))
+
+    CrownNoteBlocker "United city (" & city & "): " & answer
+    If Left$(answer, 6) <> "chose " Then Exit Function
+
+    drv.Wait 700
+    CrownUnitedRetryCity = (CrownUnitedJs(drv, CrownUnitedButtonJs("quote")) = "clicked")
+End Function
+
+' The City on the Input sheet: the cell to the right of the one reading "City".
+Private Function CrownInputCity() As String
+    Dim f As Range
+
+    On Error Resume Next
+    Set f = ThisWorkbook.Worksheets("Input").Range("A1:H60").Find(What:="City", LookAt:=xlWhole, MatchCase:=False)
+    If Not f Is Nothing Then CrownInputCity = Trim$(CStr(f.Offset(0, 1).Value))
+    On Error GoTo 0
+End Function
+
 ' A script that clicks the button reading exactly that (any case), or says so.
 Private Function CrownUnitedButtonJs(ByVal words As String) As String
     CrownUnitedButtonJs = _
