@@ -36,6 +36,13 @@ Private Const VERVE_DIRECT_PLAN As String = "5 Pay 16.67% Down"
 
 Public CrownVerveDirectDown As String
 Public CrownVerveDirectMonthly As String
+
+' 18 Nov (Tony: "4 quotes from each company"): the other first-payment
+' wait of each - staff see them on the website card, customers do not.
+Private Const VERVE_PLAN_2 As String = "5 Pay 16.67% Down CC"               ' auto pay, 17 days
+Private Const VERVE_DIRECT_PLAN_2 As String = "5 Pay 16.67% Down 30 Day Due" ' direct bill, 30 days
+Public CrownVerveAuto2Down As String, CrownVerveAuto2Monthly As String, CrownVerveAuto2FirstDue As String
+Public CrownVerveDirect2Down As String, CrownVerveDirect2Monthly As String, CrownVerveDirect2FirstDue As String
 ' First payment due date of each (29 Oct), from the pay plan's Due Date column.
 Public CrownVerveFirstDue As String
 Public CrownVerveDirectFirstDue As String
@@ -652,6 +659,10 @@ Private Function CrownVerveReadPlan(ByVal drv As ChromeDriver, ByRef down As Str
 
     rows = CrownVervePlanRows(drv)
 
+    ' The two other plans, quietly - they never decide the result either.
+    CrownVervePlanFigures rows, VERVE_PLAN_2, CrownVerveAuto2Down, CrownVerveAuto2Monthly, CrownVerveAuto2FirstDue
+    CrownVervePlanFigures rows, VERVE_DIRECT_PLAN_2, CrownVerveDirect2Down, CrownVerveDirect2Monthly, CrownVerveDirect2FirstDue
+
     ' The direct bill row first, quietly - it never decides the result.
     lines = Split(rows, vbLf)
 
@@ -826,6 +837,35 @@ Private Function CrownVerveElement(ByVal drv As ChromeDriver, ByVal id As String
                               "return !!(e&&e.getClientRects().length);", id)
     CrownVerveElement = (found = True)
 End Function
+
+' Down, instalment and next due date of the row whose description is
+' exactly this plan (CrownVerveFlat on both sides); "" for each when the
+' table does not have it.
+Private Sub CrownVervePlanFigures(ByVal rows As String, ByVal plan As String, _
+                                  ByRef down As String, ByRef monthly As String, ByRef firstDue As String)
+    Dim lines() As String, cells() As String, i As Long, c As Long
+
+    down = "": monthly = "": firstDue = ""
+    If Len(rows) = 0 Then Exit Sub
+
+    lines = Split(rows, vbLf)
+
+    For i = LBound(lines) To UBound(lines)
+        cells = Split(lines(i), vbTab)
+
+        For c = LBound(cells) To UBound(cells)
+            If StrComp(CrownVerveFlat(cells(c)), CrownVerveFlat(plan), vbTextCompare) = 0 Then
+                If UBound(cells) >= c + 5 Then
+                    down = CrownPlainMoney(cells(c + 1))
+                    monthly = CrownPlainMoney(cells(c + 5))
+                    If UBound(cells) >= c + 6 Then firstDue = Trim$(cells(c + 6))
+                End If
+
+                Exit Sub
+            End If
+        Next c
+    Next i
+End Sub
 
 ' Every row of the pay plan table, cells separated by tabs.
 Private Function CrownVervePlanRows(ByVal drv As ChromeDriver) As String

@@ -708,6 +708,21 @@ Private Function CrownRunVerve(ByVal ws As Worksheet, ByVal row As Long, _
                     CrownLogQuoteHistory "Verve (direct bill)", CrownVerveDirectDown, CrownVerveDirectMonthly, term
                 End If
             End If
+
+            ' 18 Nov: the other first-payment wait of each, for staff only.
+            If Len(CrownVerveAuto2Down) > 0 Then
+                CrownQuoteResult id, Array("carrier", "state", "down", "monthly", "term", "who", "plan", "due", "note"), _
+                    Array("Verve", "quoted", CrownVerveAuto2Down, CrownVerveAuto2Monthly, term, "the quoting tool", "autopay2", _
+                          CrownVerveAuto2FirstDue, "5 Pay 16.67% Down CC (17 days)")
+                note = note & " / auto pay 17 days: down " & CrownVerveAuto2Down
+            End If
+
+            If Len(CrownVerveDirect2Down) > 0 Then
+                CrownQuoteResult id, Array("carrier", "state", "down", "monthly", "term", "who", "plan", "due", "note"), _
+                    Array("Verve", "quoted", CrownVerveDirect2Down, CrownVerveDirect2Monthly, term, "the quoting tool", "direct2", _
+                          CrownVerveDirect2FirstDue, "5 Pay 16.67% Down 30 Day Due")
+                note = note & " / direct bill 30 days: down " & CrownVerveDirect2Down
+            End If
         Else
             note = note & " - the website refused it: " & Left$(answer, 90)
         End If
