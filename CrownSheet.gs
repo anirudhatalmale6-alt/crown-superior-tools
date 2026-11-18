@@ -6,6 +6,10 @@
  * reads. A customer who is not on the sheet yet gets a new row at the
  * bottom, filled in from their website request under your own headings.
  *
+ * 18 Nov: an EDIT on the website (Edit request on the Quotes page) is sent
+ * here too, with only the boxes that changed. Those cells in the customer's
+ * row are written over with the new answers; nothing else is touched.
+ *
  * UPDATING FROM AN EARLIER VERSION
  *   1. In the editor, copy your two lines SHEET_ID = ... and SECRET = ...
  *      somewhere safe (Notepad).
@@ -157,6 +161,23 @@ function doPost(e) {
 
     var row = findRow(sheet, headings, body);
     var added = false;
+
+    // An edit made on the website: the changed answers, written over the
+    // customer's existing row. A customer not on the sheet is left alone.
+    if (body.mode === 'edit') {
+      if (!row) {
+        return reply({ ok: true, row: 0, wrote: 0, note: 'not on the sheet - nothing to update' });
+      }
+
+      var changed = writeEdits(sheet, row, headings, body);
+      var stampAt = headings.indexOf(ID_HEADING.trim().toLowerCase());
+
+      if (stampAt >= 0 && body.request_id) {
+        sheet.getRange(row, stampAt + 1).setValue(body.request_id);
+      }
+
+      return reply({ ok: true, row: row, wrote: changed, edit: true });
+    }
 
     // A customer who is not on the sheet yet - a request straight off the
     // website. Their row is added at the bottom under YOUR headings (none
@@ -323,6 +344,32 @@ function addRow(sheet, headings, body) {
   sheet.appendRow(line);
 
   return sheet.getLastRow();
+}
+
+
+/**
+ * An edit from the website: the cells the changed answers belong under are
+ * written over. Only what changed is sent, so every other cell - including
+ * anything typed on the sheet - stays as it is. saved_at is never changed.
+ */
+function writeEdits(sheet, row, headings, body) {
+  var line = rowValues(headings, { fields: body.fields || {}, email: '', first_name: '', last_name: '' });
+  if (!line) { return 0; }
+
+  var range = sheet.getRange(row, 1, 1, headings.length);
+  var have = range.getValues()[0];
+  var wrote = 0;
+
+  for (var c = 0; c < headings.length; c++) {
+    if (line[c] === '' || flat(headings[c]) === 'savedat') { continue; }
+    if (String(have[c]) === String(line[c])) { continue; }
+    have[c] = line[c];
+    wrote++;
+  }
+
+  if (wrote) { range.setValues([have]); }
+
+  return wrote;
 }
 
 
