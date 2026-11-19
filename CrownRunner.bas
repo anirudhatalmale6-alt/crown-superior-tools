@@ -287,6 +287,19 @@ Public Sub CrownRunQuotes()
             pPlan = "direct": extraDirect = False
         End If
 
+        ' 19 Nov (Tony, LaSunya Cooks #12600: "i clicked to leave quote to me.
+        ' it still quoted"): United was already running when it was left to
+        ' staff. Its price is not put on the card - the request is theirs now.
+        If (Len(down) > 0 Or Len(monthly) > 0) And Not leftAlone Then
+            If Not CrownQuoteStillWanted(CLng(ids(i)), "united", stopWhy) Then
+                If InStr(1, stopWhy, "left to staff", vbTextCompare) > 0 Then
+                    leftAlone = True
+                    note = Trim$(note & " United finished after the request was left to staff - its price was NOT put on the website")
+                    down = "": monthly = ""
+                End If
+            End If
+        End If
+
         If Len(down) > 0 Or Len(monthly) > 0 Then
             answer = CrownQuoteResult(CLng(ids(i)), _
                 Array("carrier", "state", "down", "monthly", "term", "who", "plan", "due"), _
@@ -315,7 +328,7 @@ Public Sub CrownRunQuotes()
                 inARow = inARow + 1
                 note = Trim$(note & " the website refused it: " & Left$(answer, 90))
             End If
-        ElseIf Len(CrownLastStopReason) = 0 And doUnited Then
+        ElseIf Len(CrownLastStopReason) = 0 And doUnited And Not leftAlone Then
             failed = failed + 1
             inARow = inARow + 1
         End If
@@ -687,6 +700,18 @@ Private Function CrownRunVerve(ByVal ws As Worksheet, ByVal row As Long, _
     If Err.Number <> 0 Then note = "Verve: stopped - " & Err.Description
     Err.Clear
     On Error GoTo 0
+
+    ' 19 Nov: left to staff while Verve was running - nothing put on the card.
+    Dim whyLeft As String
+    If Len(down) > 0 Or Len(monthly) > 0 Then
+        If Not CrownQuoteStillWanted(id, "verve", whyLeft) Then
+            If InStr(1, whyLeft, "left to staff", vbTextCompare) > 0 Then
+                note = Trim$(note & " - Verve finished after the request was left to staff, its price was NOT put on the website")
+                down = "": monthly = ""
+                CrownRunVerve = True             ' not a failure to report back
+            End If
+        End If
+    End If
 
     If Len(down) > 0 Or Len(monthly) > 0 Then
         answer = CrownQuoteResult(id, _
