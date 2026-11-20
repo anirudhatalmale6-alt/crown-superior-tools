@@ -464,6 +464,7 @@ Private Sub CrownPullApply(ByVal answer As String, ByVal policyNo As String, ByV
     Dim keepRow As Variant, failed As String
     Dim bills As Collection, uws As Collection, firstPay As Variant, firstInst As Variant
     Dim adminNow As String, adminAdd As String, uwLine As String, guardNote As String, nextPay As String
+    Dim lienSeen As String
 
     Set wsEdit = ThisWorkbook.Worksheets("Edit Data")
     keepRow = wsEdit.Range("C5").value
@@ -496,6 +497,7 @@ Private Sub CrownPullApply(ByVal answer As String, ByVal policyNo As String, ByV
                 If Not CrownPullGone(CStr(f(5))) And Len(Trim$(CStr(f(1)))) > 0 Then vehicles.Add f
             Case "COV": covers.Add f
             Case "LIEN": liens.Add f
+            Case "LIENSEEN": lienSeen = CStr(f(1))
             Case "ADDR": addr = f
             Case "VEHNAME": vNames.Add f
             Case "BILL": bills.Add f
@@ -686,8 +688,9 @@ Private Sub CrownPullApply(ByVal answer As String, ByVal policyNo As String, ByV
                 Next item
             End If
 
-            ' No lienholder at United for this vehicle: none on Edit Data.
-            If k > liens.Count Then
+            ' No lienholder at United for this vehicle: none on Edit Data - unless
+            ' the page mentions one the tool could not read (then it is left alone).
+            If k > liens.Count And Len(lienSeen) = 0 Then
                 CrownPullAdd changes, wsEdit, col & "30", "Vehicle " & k & " - lien holder", ""
                 If k <= 2 Then CrownPullAdd changes, wsEdit, col & "31", "Vehicle " & k & " - lien holder detail", ""
             End If
@@ -696,6 +699,16 @@ Private Sub CrownPullApply(ByVal answer As String, ByVal policyNo As String, ByV
 
     If liens.Count > 0 And vehicles.Count > 1 Then
         notes.Add carrier & " lists lienholders without saying which vehicle each is for - they were matched in order, check them"
+    End If
+
+    ' A lienholder but no vehicle read: it still belongs on vehicle 1.
+    If liens.Count > 0 And vehicles.Count = 0 Then
+        CrownPullAdd changes, wsEdit, vCols(0) & "30", "Vehicle 1 - lien holder", "Yes"
+        CrownPullAdd changes, wsEdit, vCols(0) & "31", "Vehicle 1 - lien holder detail", Trim$(liens(1)(1) & ", " & liens(1)(2))
+    End If
+
+    If liens.Count = 0 And Len(lienSeen) > 0 Then
+        notes.Add carrier & "'s page mentions a lienholder the tool could not read - please send Anirudha this line: " & lienSeen
     End If
 
     ' --- payment (Tony, 2 Nov: "payment made was 299.89. So that should go in
@@ -1049,8 +1062,9 @@ Private Function CrownPullUnitedJs() As String
         "if(inCov&&/^(CLP|COLL|CLG)$/.test(n[0]||''))coll=n[2]||'';" & _
         "if(inCov&&/^(CPP|COMP|CPG)$/.test(n[0]||''))comp=n[2]||'';" & _
         "if(inCov&&/^Total Premium for Vehicle/i.test(n[0]||'')){out.push('COV|'+cov+'|'+coll+'|'+comp);inCov=false;}" & _
-        "if(n[0]==='Lienholder'&&n[1]==='Address'){inLien=true;continue;}" & _
-        "if(inLien){if(n.length===2&&!/Coverages|Information/i.test(n[0])){out.push('LIEN|'+n[0]+'|'+n[1]);continue;}inLien=false;}" & _
+        "if(!inLien){var li=-1,ai=-1;for(var q=0;q<n.length;q++){if(/^lien\s*holder(\s*name)?:?$/i.test(n[q]))li=q;else if(li>=0&&ai<0&&/^address:?$/i.test(n[q]))ai=q;}if(li>=0&&ai>li){inLien={l:li,a:ai,h:n.length};continue;}}" & _
+        "if(inLien){if(!n.length)continue;if(/^(coverages?|code|vehicle\s*\d*|total premium|billing|statement|driver)/i.test(n[0])||/information$/i.test(n[0])){inLien=false;}" & _
+        "else{var ln=n.length===inLien.h?n[inLien.l]:n[0],la=n.length===inLien.h?n[inLien.a]:n.slice(1).join(', ');out.push('LIEN|'+ln+'|'+la);continue;}}" & _
         "if(n[0]==='Statement'&&/Amount/.test(line)){inBill=true;continue;}" & _
         "if(inBill){var m=line.match(/\$\s*(-?[0-9,]+\.\d\d)/),ds=line.match(/\d\d-\d\d-\d\d(\d\d)?/g);" & _
         "if(m&&ds&&n[0]&&!/^\{/.test(n[0])){out.push('BILL|'+n[0]+'|'+ds[0]+'|'+ds[ds.length-1]+'|'+m[1].replace(/,/g,''));continue;}inBill=false;}" & _
@@ -1059,6 +1073,14 @@ Private Function CrownPullUnitedJs() As String
         "if(uw){if(n.length===uw.h.length&&/\d/.test(n[uw.d]||'')&&n[uw.t]){out.push('UW|'+n[uw.d]+'|'+n[uw.t]+'|'+line);continue;}uw=null;}}" & _
         "if(inCov)out.push('COV|'+cov+'|'+coll+'|'+comp);" & _
         "var nx=(document.body.innerText||'').match(/next\s+recurring[^.]*?payment\s+is\s+scheduled\s+for\s+(\d{1,2}[-\/]\d{1,2}[-\/]\d{2,4})/i);if(nx)out.push('NEXT|'+nx[1]);"
+    ' 20 Nov (Tony: "it did not add the lienholder ... lienholder is [there]"):
+    ' a lienholder on the page that the rows above missed is read from the page
+    ' text instead, and if even that fails the PolicyPull notes get what the
+    ' tool saw around the word, so the next fix is not a guess.
+    CrownPullUnitedJs = CrownPullUnitedJs & _
+        "if(!out.some(function(x){return x.indexOf('LIEN|')===0;})){var bt=document.body.innerText||'',lm=bt.match(/Lien\s*holder\s*\t+\s*Address\s*\n+([^\n\t]+)\t+([^\n]+)/i);" & _
+        "if(lm&&!/coverages?|code/i.test(lm[1]))out.push('LIEN|'+clean(lm[1])+'|'+clean(lm[2]));" & _
+        "else{var lx=bt.search(/Lien\s*holder/i);if(lx>=0)out.push('LIENSEEN|'+clean(bt.substr(lx,220)));}}"
     CrownPullUnitedJs = CrownPullUnitedJs & _
         "return out.join('\n');"
 End Function
