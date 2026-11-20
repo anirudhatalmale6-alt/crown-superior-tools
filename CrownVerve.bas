@@ -361,6 +361,24 @@ Public Sub CrownVerveDLState(ByVal drv As Object, ByVal state As String)
     On Error GoTo 0
 End Sub
 
+' The request's relation in Verve's own words (Tony's screenshot, 20 Nov: the
+' list reads "Spouse of Policyholder", "Child of Policyholder", "Other Relation
+' to Policyholder", ... - there is no "Relative" and no plain "Other"). A Like
+' pattern for SelectDropdown; anything not listed is Other Relation.
+Public Function CrownVerveRelationPattern(ByVal relation As String) As String
+    Dim r As String
+
+    r = LCase$(Trim$(relation))
+
+    Select Case True
+        Case r Like "*spouse*", r Like "*husband*", r Like "*wife*": CrownVerveRelationPattern = "SPOUSE OF*"
+        Case r Like "*child*", r Like "*son*", r Like "*daughter*": CrownVerveRelationPattern = "CHILD OF*"
+        Case r Like "*parent*", r Like "*mother*", r Like "*father*": CrownVerveRelationPattern = "PARENT OF*"
+        Case r Like "*guardian*": CrownVerveRelationPattern = "GUARDIAN OF*"
+        Case Else: CrownVerveRelationPattern = "OTHER RELATION*"
+    End Select
+End Function
+
 ' 20 Nov (Tony, Corrine Mack: "(R-174) Driver Relation to Policy Holder is
 ' required" - LeAnthony is a "Relative", which Verve does not list, so the box
 ' stayed on None. "on verve it should select other"). After the driver's
@@ -374,7 +392,7 @@ Public Sub CrownVerveRelationCheck(ByVal drv As Object, ByVal relation As String
 
     On Error Resume Next
 
-    For Each want In Array(Trim$(relation), "Other")
+    For Each want In Array(CrownVerveRelationPattern(relation), "OTHER RELATION*")
         v = Trim$(CStr(drv.ExecuteScript("var e=document.getElementById(arguments[0]);return e?e.value:'';", inp)))
         If Len(v) > 0 And LCase$(v) <> "none" Then Exit For
         If Len(want) = 0 Then GoTo NextWant
@@ -387,7 +405,7 @@ Public Sub CrownVerveRelationCheck(ByVal drv As Object, ByVal relation As String
             "var l=document.getElementById(arguments[0])||document,w=arguments[1].toLowerCase(),seen=[];" & _
             "var o=document.querySelectorAll('[data-crown-rel]');for(var q=0;q<o.length;q++)o[q].removeAttribute('data-crown-rel');" & _
             "var td=[].slice.call(l.querySelectorAll('td')).filter(function(t){return vis(t)&&!t.querySelector('td');});" & _
-            "for(var q=0;q<td.length;q++){var x=(td[q].innerText||'').trim();if(x)seen.push(x);if(x.toLowerCase()===w){td[q].setAttribute('data-crown-rel','1');return 'mark '+x;}}" & _
+            "var pre=w.replace(/\*+$/,'');for(var q=0;q<td.length;q++){var x=(td[q].innerText||'').trim();if(x)seen.push(x);if(x.toLowerCase().indexOf(pre)===0){td[q].setAttribute('data-crown-rel','1');return 'mark '+x;}}" & _
             "return 'not in the list ('+seen.slice(0,15).join(', ')+')';", lst, CStr(want)))
         If Left$(answer, 4) = "mark" Then drv.FindElementByCss("[data-crown-rel]").Click   ' a real click
         drv.Wait 900
@@ -403,13 +421,13 @@ NextWant:
     If Len(v) = 0 Or LCase$(v) = "none" Then
         answer = CStr(drv.ExecuteScript( _
             "var c=null;try{c=ASPxClientControl.GetControlCollection().Get(arguments[0].replace(/_I$/,''));}catch(e){}" & _
-            "if(!c||!c.GetItemCount)return 'no control';var w=(arguments[1]||'').toLowerCase(),n=c.GetItemCount(),seen=[],pick=-1,oth=-1;" & _
+            "if(!c||!c.GetItemCount)return 'no control';var w=(arguments[1]||'').toLowerCase().replace(/\*+$/,''),n=c.GetItemCount(),seen=[],pick=-1,oth=-1;" & _
             "for(var i=0;i<n;i++){var it=c.GetItem(i),t=((it.texts&&it.texts.length?it.texts.join(' '):it.text)||'').trim();seen.push(t);" & _
             "var parts=(it.texts&&it.texts.length?it.texts:[it.text]).map(function(x){return (x||'').trim().toLowerCase();});" & _
-            "if(pick<0&&w&&parts.indexOf(w)>=0)pick=i;if(oth<0&&parts.some(function(x){return /^other\b/.test(x);}))oth=i;}" & _
+            "if(pick<0&&w&&parts.some(function(x){return x.indexOf(w)===0;}))pick=i;if(oth<0&&parts.some(function(x){return /^other\b/.test(x);}))oth=i;}" & _
             "if(pick<0)pick=oth;if(pick<0)return 'no '+w+' and no Other ('+seen.join(', ')+')';" & _
             "c.SetSelectedIndex(pick);try{if(c.RaiseValueChangedEvent)c.RaiseValueChangedEvent();}catch(e){}" & _
-            "return 'set '+seen[pick]+' (list: '+seen.slice(0,12).join(', ')+')';", inp, Trim$(relation)))
+            "return 'set '+seen[pick]+' (list: '+seen.slice(0,12).join(', ')+')';", inp, CrownVerveRelationPattern(relation)))
         drv.Wait 900
         CrownNoteBlocker "Verve driver relation '" & relation & "' still '" & v & "' - through the box itself: " & answer
     End If
