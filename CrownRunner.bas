@@ -392,9 +392,9 @@ Public Sub CrownRunQuotes()
             Dim why As String, told2 As String
 
             why = ""
-            If doUnited Then why = "United: " & Left$(note, 70)
+            If doUnited Then why = "United: " & Left$(note, 140)
             If doVerve And Len(vNote) > 0 Then
-                why = why & IIf(Len(why) > 0, " / ", "") & Left$(vNote, 70)
+                why = why & IIf(Len(why) > 0, " / ", "") & Left$(vNote, 140)
             End If
             If Not loaded Then why = "could not find that quote in the tool"
 

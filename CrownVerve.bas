@@ -150,7 +150,7 @@ End Sub
 ' Chooses the Company (and, if it came up empty, the LOB) on Verve's first
 ' page. Safe to call more than once: "already" when it is chosen. Returns
 ' what happened, for QuoteLook.
-Public Function CrownVervePickCompany(ByVal drv As Object, Optional ByVal waitSeconds As Long = 0) As String
+Public Function CrownVervePickCompany(ByVal drv As Object, Optional ByVal waitSeconds As Long = 0, Optional ByVal force As Boolean = False) As String
     Dim want As String, answer As String, tries As Long, started As Date
 
     want = IIf(Len(CrownVerveCompany) > 0, CrownVerveCompany, "Benchmark")
@@ -162,16 +162,17 @@ Public Function CrownVervePickCompany(ByVal drv As Object, Optional ByVal waitSe
     ' State / County show first) - so it may need a moment.
     started = Now
     Do
-        answer = CStr(drv.ExecuteScript(CrownVerveComboJs(), Array("Company", want)))
+        answer = CStr(drv.ExecuteScript(CrownVerveComboJs(), Array("Company", want, IIf(force, "1", ""))))
         If Left$(answer, 2) <> "no" Or (Now - started) * 86400 >= waitSeconds Then Exit Do
         drv.Wait 1000
         DoEvents
     Loop
 
     For tries = 1 To 3
-        If tries > 1 Or Left$(answer, 6) <> "opened" Then answer = CStr(drv.ExecuteScript(CrownVerveComboJs(), Array("Company", want)))
+        If tries > 1 Or Left$(answer, 6) <> "opened" Then answer = CStr(drv.ExecuteScript(CrownVerveComboJs(), Array("Company", want, IIf(force, "1", ""))))
 
         If Left$(answer, 7) = "already" Or Left$(answer, 2) = "no" Then Exit For
+        force = False   ' cleared once - after that a Benchmark showing is a Benchmark chosen
 
         drv.Wait 900
         answer = CStr(drv.ExecuteScript(CrownVerveItemJs(), want))
@@ -249,7 +250,7 @@ End Function
 ' press. Stops at the first one that moves the page on.
 Public Sub CrownVerveContinue(ByVal drv As Object)
     Dim answer As String, state As String, started As Date, pressed As Date
-    Dim way As Long, tried As String
+    Dim way As Long, tried As String, r1079 As Long
 
     started = Now
 
@@ -295,6 +296,19 @@ Public Sub CrownVerveContinue(ByVal drv As Object)
         Do
             drv.Wait 1000
             DoEvents
+
+            ' 20 Nov (Tony, Johnny Harris): "(R-1079) Software update in
+            ' progress, please select Benchmark Insurance Company" - the
+            ' Company box had gone back to Trisura. OK, Benchmark again, and
+            ' the presses start over (twice at most).
+            If r1079 < 2 And CrownVerveR1079(drv) Then
+                r1079 = r1079 + 1
+                CrownNoteBlocker "Verve first page: R-1079 (select Benchmark) - choosing Benchmark again"
+                CrownVervePickCompany drv, 15, True   ' cleared and chosen again - its "Benchmark" had not counted
+                way = -1
+                Exit Do
+            End If
+
             state = CrownVerveFirstPageState(drv)
             If state = "moved" Then Exit For
             If state <> "busy" And (Now - pressed) * 86400 > 10 Then Exit Do
@@ -307,6 +321,27 @@ Public Sub CrownVerveContinue(ByVal drv As Object)
     CrownLastAlert = "Verve: Continue on the first page did nothing - QuoteLook has the page"
     Err.Raise vbObjectError + 712, "CrownVerveContinue", CrownLastAlert
 End Sub
+
+' Verve's "(R-1079) ... please select Benchmark Insurance Company" message on
+' screen: its OK is pressed and True comes back.
+Private Function CrownVerveR1079(ByVal drv As Object) As Boolean
+    Dim answer As String
+
+    On Error Resume Next
+    answer = CStr(drv.ExecuteScript( _
+        "function vis(e){return !!(e&&e.getClientRects&&e.getClientRects().length);}" & _
+        "var m=[].slice.call(document.querySelectorAll('li,td,span,div')).filter(function(e){return vis(e)&&!e.children.length&&/R-1079|select Benchmark Insurance Company/i.test(e.innerText||'');})[0];" & _
+        "if(!m)return '';var box=m.closest('[class*=dxpc],[class*=Popup],[id*=Pop]')||document;" & _
+        "var ok=[].slice.call(box.querySelectorAll('input[type=button],button,a,div,span,td')).filter(function(x){return vis(x)&&((x.value||'')+' '+(x.innerText||'')).replace(/\s+/g,' ').trim().toUpperCase()==='OK'&&!x.querySelector('div,span,td');})[0];" & _
+        "if(ok)ok.click();return 'r1079';"))
+    Err.Clear
+    On Error GoTo 0
+
+    If answer = "r1079" Then
+        drv.Wait 1200
+        CrownVerveR1079 = True
+    End If
+End Function
 
 ' "moved" when the next thing is there (the existing-client pop-up or the
 ' address page), "busy" while Verve is still loading something, "here"
@@ -349,7 +384,9 @@ Private Function CrownVerveContinueJs() As String
 End Function
 
 ' Finds the drop-down beside the label (Company / LOB). "already <value>"
-' when it holds the wanted one (or anything, when nothing is wanted),
+' when it holds the wanted one (or anything, when nothing is wanted) -
+' unless the third argument forces it: then the box is cleared first so the
+' choice is made again (Verve's R-1079 with Benchmark showing, 20 Nov),
 ' "opened" after opening it, "no <label> box" when the page has none.
 Private Function CrownVerveComboJs() As String
     CrownVerveComboJs = _
@@ -360,8 +397,9 @@ Private Function CrownVerveComboJs() As String
         "var row=ls[0].closest('tr')||ls[0].parentElement;" & _
         "var inp=[].slice.call(row.querySelectorAll('input')).filter(function(x){return x.type!=='hidden'&&vis(x);})[0];" & _
         "if(!inp)return 'no '+lab+' input';var v=(inp.value||'').toLowerCase();" & _
-        "if(want?v.indexOf(want)>=0:v!=='')return 'already '+inp.value;" & _
         "var c=null;try{c=ASPxClientControl.GetControlCollection().Get(inp.id.replace(/_I$/,''));}catch(e){}" & _
+        "if(arguments[2]){try{if(c&&c.SetSelectedIndex)c.SetSelectedIndex(-1);}catch(e){}}else " & _
+        "if(want?v.indexOf(want)>=0:v!=='')return 'already '+inp.value;" & _
         "if(c&&c.ShowDropDown){c.ShowDropDown();}else{inp.focus();inp.click();var b=row.querySelector('[id$=_B-1],td[id*=_B]');if(b)b.click();}" & _
         "return 'opened';"
 End Function

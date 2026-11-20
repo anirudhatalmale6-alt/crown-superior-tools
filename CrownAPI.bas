@@ -357,13 +357,13 @@ Public Function CrownQuoteNote(ByVal submissionId As Long, ByVal carrier As Stri
                    & "&id=" & submissionId _
                    & "&note_only=1" _
                    & "&carrier=" & CrownEnc(carrier) _
-                   & "&reason=" & CrownEnc(Left$(reason, 150)))
+                   & "&reason=" & CrownEnc(Left$(reason, 300)))
 End Function
 
 Public Function CrownQuoteFail(ByVal submissionId As Long, ByVal reason As String) As String
     CrownQuoteFail = CrownPost(CrownBody("quotefail") _
                    & "&id=" & submissionId _
-                   & "&reason=" & CrownEnc(Left$(reason, 150)))
+                   & "&reason=" & CrownEnc(Left$(reason, 300)))
 End Function
 
 ' Is this request still ours to quote with this company? (13 Nov, Tony:
