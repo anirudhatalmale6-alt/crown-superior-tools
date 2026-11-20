@@ -322,6 +322,44 @@ Public Sub CrownVerveContinue(ByVal drv As Object)
     Err.Raise vbObjectError + 712, "CrownVerveContinue", CrownLastAlert
 End Sub
 
+' 20 Nov (Tony, Corrine Mack: "(R-174) Driver Relation to Policy Holder is
+' required" - LeAnthony is a "Relative", which Verve does not list, so the box
+' stayed on None. "on verve it should select other"). After the driver's
+' relation has been chosen: still None or empty, the request's own word is
+' tried once more (trimmed), then Other. QuoteLook says what was done.
+Public Sub CrownVerveRelationCheck(ByVal drv As Object, ByVal relation As String)
+    Dim inp As String, lst As String, v As String, answer As String, want As Variant
+
+    inp = CrownVP & "_t1_c0w0_PC_t1_RelationToPolicyHolderInsCombo_D_I"
+    lst = CrownVP & "_t1_c0w0_PC_t1_RelationToPolicyHolderInsCombo_D_DDD_L_LBT"
+
+    On Error Resume Next
+
+    For Each want In Array(Trim$(relation), "Other")
+        v = Trim$(CStr(drv.ExecuteScript("var e=document.getElementById(arguments[0]);return e?e.value:'';", inp)))
+        If Len(v) > 0 And LCase$(v) <> "none" Then Exit For
+        If Len(want) = 0 Then GoTo NextWant
+
+        drv.ExecuteScript "var c=null;try{c=ASPxClientControl.GetControlCollection().Get(arguments[0].replace(/_I$/,''));}catch(e){}" & _
+                          "if(c&&c.ShowDropDown){c.ShowDropDown();}else{var i=document.getElementById(arguments[0]);if(i)i.click();}", inp
+        drv.Wait 700
+        answer = CStr(drv.ExecuteScript( _
+            "function vis(e){return !!(e&&e.getClientRects&&e.getClientRects().length);}" & _
+            "var l=document.getElementById(arguments[0])||document,w=arguments[1].toLowerCase(),seen=[];" & _
+            "var o=document.querySelectorAll('[data-crown-rel]');for(var q=0;q<o.length;q++)o[q].removeAttribute('data-crown-rel');" & _
+            "var td=[].slice.call(l.querySelectorAll('td')).filter(function(t){return vis(t)&&!t.querySelector('td');});" & _
+            "for(var q=0;q<td.length;q++){var x=(td[q].innerText||'').trim();if(x)seen.push(x);if(x.toLowerCase()===w){td[q].setAttribute('data-crown-rel','1');return 'mark '+x;}}" & _
+            "return 'not in the list ('+seen.slice(0,15).join(', ')+')';", lst, CStr(want)))
+        If Left$(answer, 4) = "mark" Then drv.FindElementByCss("[data-crown-rel]").Click   ' a real click
+        drv.Wait 900
+        CrownNoteBlocker "Verve driver relation '" & relation & "' showed '" & v & "' - " & want & ": " & answer
+NextWant:
+    Next want
+
+    Err.Clear
+    On Error GoTo 0
+End Sub
+
 ' Verve's "(R-1079) ... please select Benchmark Insurance Company" message on
 ' screen: its OK is pressed and True comes back.
 Private Function CrownVerveR1079(ByVal drv As Object) As Boolean

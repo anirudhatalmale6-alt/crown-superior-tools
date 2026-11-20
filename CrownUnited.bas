@@ -838,6 +838,35 @@ Public Function CrownUnitedRetryCity(ByVal drv As Object) As Boolean
     CrownUnitedRetryCity = (CrownUnitedJs(drv, CrownUnitedButtonJs("quote")) = "clicked")
 End Function
 
+' 20 Nov (Tony, Corrine Mack): driver 3 (Mandi, excluded) was not on United's
+' quote page the tool left open - rows 3 and 4 empty - so when the quote went
+' on, United asked for driver 2's spouse. Before a driver's row is typed into:
+' if its date-of-birth box is not on the page, Add Driver is pressed (up to
+' three times). QuoteLook says what it found either way.
+Public Sub CrownUnitedDriverRow(ByVal drv As Object, ByVal n As Long, ByVal who As String)
+    Dim answer As String, tries As Long
+
+    For tries = 1 To 4
+        answer = CrownUnitedJs(drv, _
+            "function vis(e){return !!(e&&e.getClientRects&&e.getClientRects().length);}" & _
+            "var d=document.getElementById('tbxDOB" & n & "');if(vis(d))return 'there';" & _
+            "var b=[].slice.call(document.querySelectorAll('input[type=button],input[type=submit],button,a')).filter(function(x){return vis(x)&&((x.value||'')+' '+(x.innerText||'')).replace(/\s+/g,' ').trim().toLowerCase()==='add driver';})[0];" & _
+            "if(!b)return d?'box hidden, no Add Driver button':'no box, no Add Driver button';setTimeout(function(){b.click();},50);return 'pressed Add Driver';")
+        If answer <> "pressed Add Driver" And answer <> "wait" Then Exit For
+        drv.Wait 1500
+    Next tries
+
+    CrownNoteBlocker "United driver " & n & " (" & who & "): row " & answer
+End Sub
+
+' After a driver's row was typed: what United's boxes now hold, into
+' QuoteLook - so a driver that did not stick shows there.
+Public Sub CrownUnitedDriverCheck(ByVal drv As Object, ByVal n As Long, ByVal who As String)
+    CrownNoteBlocker "United driver " & n & " (" & who & ") after typing: " & CrownUnitedJs(drv, _
+        "function v(id){var e=document.getElementById(id);if(!e)return '(none)';return e.tagName==='SELECT'&&e.selectedIndex>=0?e.options[e.selectedIndex].text:e.value;}" & _
+        "return 'DOB '+v('tbxDOB" & n & "')+', sex '+v('dbxSEX" & n & "')+', marital '+v('dbxMRS" & n & "')+', type '+v('dbxDRVTYPE" & n & "');")
+End Sub
+
 ' The City on the Input sheet: the cell to the right of the one reading "City".
 Private Function CrownInputCity() As String
     Dim f As Range
