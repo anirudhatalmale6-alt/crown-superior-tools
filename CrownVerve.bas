@@ -322,6 +322,45 @@ Public Sub CrownVerveContinue(ByVal drv As Object)
     Err.Raise vbObjectError + 712, "CrownVerveContinue", CrownLastAlert
 End Sub
 
+' 20 Nov (Tony, Corrine Mack: "tool should select arkansas"): the driver's DL
+' State was never filled in, so Verve kept its own Georgia for an Arkansas
+' licence. Found by its "DL State" label (the box after it), opened, and the
+' state picked by its two letters - AR - with a real click. Nothing done when
+' the request has no state or the box already shows it.
+Public Sub CrownVerveDLState(ByVal drv As Object, ByVal state As String)
+    Dim answer As String, full As String
+
+    state = UCase$(Trim$(state))
+    If Len(state) = 0 Then Exit Sub
+    full = UCase$(stateshort(state))        ' AR or Arkansas -> ARKANSAS
+
+    On Error Resume Next
+    answer = CStr(drv.ExecuteScript( _
+        "function vis(e){return !!(e&&e.getClientRects&&e.getClientRects().length);}" & _
+        "var want=arguments[0],full=arguments[1],lab=[].slice.call(document.querySelectorAll('td,span,label,div')).filter(function(e){return vis(e)&&!e.children.length&&/^\*?\s*DL State\s*:?$/i.test((e.innerText||'').trim());})[0];" & _
+        "if(!lab)return 'no DL State box';" & _
+        "var inp=[].slice.call(document.querySelectorAll('input')).filter(function(x){return x.type!=='hidden'&&vis(x)&&(lab.compareDocumentPosition(x)&4);})[0];" & _
+        "if(!inp)return 'no DL State input';var v=(inp.value||'').trim().toUpperCase();" & _
+        "if(v===want||v.indexOf(want+' ')===0||(full&&v.indexOf(full)>=0))return 'already '+inp.value;" & _
+        "var c=null;try{c=ASPxClientControl.GetControlCollection().Get(inp.id.replace(/_I$/,''));}catch(e){}" & _
+        "if(c&&c.ShowDropDown){c.ShowDropDown();}else{inp.click();}return 'opened '+inp.value;", state, full))
+
+    If Left$(answer, 6) = "opened" Then
+        drv.Wait 800
+        answer = answer & " -> " & CStr(drv.ExecuteScript( _
+            "function vis(e){return !!(e&&e.getClientRects&&e.getClientRects().length);}" & _
+            "var want=arguments[0],full=arguments[1],o=document.querySelectorAll('[data-crown-st]');for(var q=0;q<o.length;q++)o[q].removeAttribute('data-crown-st');" & _
+            "var td=[].slice.call(document.querySelectorAll('td')).filter(function(t){return vis(t)&&!t.querySelector('td')&&((t.innerText||'').trim().toUpperCase()===want||(t.innerText||'').trim().toUpperCase()===full);})[0];" & _
+            "if(!td)return 'no '+want+' in the list';var row=td.closest('tr')||td;row.setAttribute('data-crown-st','1');return 'chose '+(row.innerText||'').replace(/\s+/g,' ').trim();", state, full))
+        If InStr(answer, "-> chose") > 0 Then drv.FindElementByCss("[data-crown-st]").Click   ' a real click
+        drv.Wait 900
+    End If
+
+    CrownNoteBlocker "Verve DL State " & state & ": " & answer
+    Err.Clear
+    On Error GoTo 0
+End Sub
+
 ' 20 Nov (Tony, Corrine Mack: "(R-174) Driver Relation to Policy Holder is
 ' required" - LeAnthony is a "Relative", which Verve does not list, so the box
 ' stayed on None. "on verve it should select other"). After the driver's

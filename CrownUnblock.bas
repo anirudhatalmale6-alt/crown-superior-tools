@@ -1,6 +1,12 @@
 Attribute VB_Name = "CrownUnblock"
 Option Explicit
 
+' For CrownFormOnTop: a message box the tool shows must not open behind Chrome.
+Private Declare PtrSafe Function CrownFindWindow Lib "user32" Alias "FindWindowA" (ByVal lpClassName As String, ByVal lpWindowName As String) As LongPtr
+Private Declare PtrSafe Function CrownSetWindowPos Lib "user32" Alias "SetWindowPos" (ByVal hwnd As LongPtr, ByVal hWndInsertAfter As LongPtr, _
+    ByVal x As Long, ByVal y As Long, ByVal cx As Long, ByVal cy As Long, ByVal wFlags As Long) As Long
+Private Declare PtrSafe Function CrownSetForegroundWindow Lib "user32" Alias "SetForegroundWindow" (ByVal hwnd As LongPtr) As Long
+
 ' =====================================================================
 ' Crown Superior - getting past the things that stop a quote
 ' ---------------------------------------------------------------------
@@ -451,6 +457,22 @@ End Function
 ' Its own sheet rather than a message box, because the whole point is for
 ' the run not to stop. A note you read afterwards costs nothing; a box
 ' you have to close is the thing being removed.
+' The tool's own message forms (Yes/No, OK/Cancel, OK) open modeless and,
+' with Chrome in front, out of sight - the macro then waited five minutes for
+' an answer nobody knew was wanted. The form with that caption is put on top
+' of every window and given the focus.
+Public Sub CrownFormOnTop(ByVal caption As String)
+    Dim h As LongPtr
+
+    On Error Resume Next
+    DoEvents
+    h = CrownFindWindow("ThunderDFrame", caption)
+    If h = 0 Then Exit Sub
+
+    CrownSetWindowPos h, -1, 0, 0, 0, 0, &H1 Or &H2 Or &H40   ' TOPMOST, no move, no size, show
+    CrownSetForegroundWindow h
+End Sub
+
 Public Sub CrownNoteBlocker(ByVal what As String)
     Dim ws As Worksheet
     Dim row As Long
