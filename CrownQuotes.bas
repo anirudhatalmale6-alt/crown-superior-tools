@@ -1489,6 +1489,110 @@ Public Function CrownLoadQuoteById(ByVal submissionId As Long, ByRef who As Stri
 End Function
 
 
+' 20 Nov (Tony, Corrine Mack: "it still coming back and quoting without 3rd
+' driver"). The quoting macros read every driver from FIXED columns on Output
+' (driver 3's first name is column 56), but the request reaches Output through
+' Crown Quote List, matched by heading name - a heading the list does not
+' have, or has under another name, never arrives. So after loading, drivers 2
+' to 4 are checked against the request on the website, field by field, and
+' any column that is blank or different is written straight into its fixed
+' column on Output (and Edit Data is re-read). What was changed goes in
+' QuoteLook. Returns how many cells were put right.
+Public Function CrownSyncDriversFromSite(ByVal submissionId As Long) As Long
+    Dim csv As String, nl As Long, head() As String, vals() As String
+    Dim site As Object, output As Worksheet, map As Variant, m As Variant
+    Dim k As Long, want As String, have As String, fixed As String, n As Long
+
+    On Error GoTo Done
+
+    csv = CrownPost(CrownBody("quotecsv") & "&id=" & submissionId)
+    If Len(csv) = 0 Or Left$(csv, 5) = "error" Then Exit Function
+
+    nl = InStr(csv, vbLf)
+    If nl = 0 Then Exit Function
+    head = CrownSplitCsvLine(Replace(Left$(csv, nl - 1), vbCr, ""))
+    vals = CrownSplitCsvLine(Mid$(csv, nl + 1))
+
+    Set site = CreateObject("Scripting.Dictionary")
+    site.CompareMode = 1
+    For k = 0 To UBound(head)
+        If k <= UBound(vals) Then
+            If Not site.Exists(Trim$(head(k))) Then site.Add Trim$(head(k)), Trim$(Replace(Replace(vals(k), vbCr, ""), vbLf, " "))
+        End If
+    Next k
+    If Not site.Exists("SubmissionId") Then Exit Function
+    If Val(site("SubmissionId")) <> submissionId Then Exit Function
+
+    Set output = ThisWorkbook.Sheets("Output")
+
+    ' website field (name trimmed) -> Output column (modZVariable)
+    map = Array( _
+        Array("Second driver", colDriver2), Array("Driver_2_relation", colDriverRelation2), Array("Exclude", colDriverExcluded2), _
+        Array("Driver 2 First", colDriverFirstName2), Array("Driver 2 Last", colDriverLastName2), Array("Driver 2 dob", colDriverDOB2), _
+        Array("driver 2 Gender", colDriverGender2), Array("Driver 2 Marital Status", colDriverMaritalStatus2), Array("Driver 2 DL", colDriverLicense2), _
+        Array("DL_state_Drv 2", colLicenseState2), _
+        Array("third_driver_", colDriver3), Array("Exclude  driver 3", colDriverExcluded3), Array("Driver_3_relation", colDriverRelation3), _
+        Array("Driver 3 First", colDriverFirstName3), Array("Driver 3 Last", colDriverLastName3), Array("Driver 3 dob", colDriverDOB3), _
+        Array("driver 3 Gender", colDriverGender3), Array("Driver 3 Marital Status", colDriverMaritalStatus3), Array("Driver 3 DL", colDriverLicense3), _
+        Array("DL_state_Drv 3_copy", colLicenseState3), Array("Driver 3 industry", colDriverIndustry3), Array("Driver  3 JOB TITLE", colDriverJobTitle3), _
+        Array("Fouth driver", colDriver4), Array("Exclude  driver 4", colDriverExcluded4), Array("Driver_4_relation_copy", colDriverRelation4), _
+        Array("Driver 4 First", colDriverFirstName4), Array("Driver 4 Last", colDriverLastName4), Array("Driver 4 dob", colDriverDOB4), _
+        Array("driver 4 Gender", colDriverGender4), Array("Driver 4 Marital Status", colDriverMaritalStatus4), Array("Driver 4 DL", colDriverLicense4), _
+        Array("DL_state_Drv 4_copy_copy", colLicenseState4))
+
+    For Each m In map
+        If site.Exists(CStr(m(0))) Then
+            want = CStr(site(CStr(m(0))))
+            If LCase$(want) = "select" Then want = ""
+            have = Trim$(CStr(output.Cells(2, CLng(m(1))).Text))
+
+            If InStr(1, CStr(m(0)), "dob", vbTextCompare) > 0 Then
+                ' "2 / 21 / 1999" on the website, a date on Output.
+                want = Replace(want, " ", "")
+                If IsDate(want) And IsDate(output.Cells(2, CLng(m(1))).value) Then
+                    If CDate(want) = CDate(output.Cells(2, CLng(m(1))).value) Then GoTo NextField
+                End If
+                If IsDate(want) Then
+                    If StrComp(have, want, vbTextCompare) <> 0 Then
+                        output.Cells(2, CLng(m(1))).value = CDate(want)
+                        fixed = fixed & ", " & CStr(m(0)) & " '" & have & "' -> '" & want & "'"
+                        n = n + 1
+                    End If
+                    GoTo NextField
+                End If
+            End If
+
+            ' Only blanks are filled for a licence (the leading-zero fix on
+            ' Output must not be undone); every other field takes the website's.
+            If InStr(1, CStr(m(0)), " DL", vbTextCompare) > 0 And Left$(CStr(m(0)), 2) <> "DL" Then
+                If Len(have) > 0 Or Len(want) = 0 Then GoTo NextField
+            End If
+
+            If StrComp(have, want, vbTextCompare) <> 0 Then
+                output.Cells(2, CLng(m(1))).NumberFormat = "@"
+                output.Cells(2, CLng(m(1))).value = want
+                fixed = fixed & ", " & CStr(m(0)) & " '" & have & "' -> '" & want & "'"
+                n = n + 1
+            End If
+        End If
+NextField:
+    Next m
+
+    If n > 0 Then
+        CrownNoteBlocker "Request " & submissionId & ": " & n & " driver box(es) on Output did not match the website and were put right" & fixed
+        On Error Resume Next
+        ThisWorkbook.Sheets("Edit Data").Range("C5").value = 2
+        RetrieveDataByRowNumber
+    Else
+        CrownNoteBlocker "Request " & submissionId & ": drivers 2-4 on Output match the website (driver 3: '" & _
+                         Trim$(CStr(output.Cells(2, colDriverFirstName3).Text)) & "')"
+    End If
+
+    CrownSyncDriversFromSite = n
+Done:
+End Function
+
+
 Private Function CrownWhoIsOnRow(ByVal ws As Worksheet, ByVal columns As Long, _
                                  ByVal row As Long) As String
     Dim first As Long, last As Long, email As Long

@@ -199,6 +199,14 @@ Public Sub CrownRunQuotes()
 
         loaded = CrownLoadQuoteById(CLng(ids(i)), who)
 
+        ' 20 Nov: drivers 2-4 checked against the website (driver 3 went missing).
+        If loaded Then
+            On Error Resume Next
+            CrownSyncDriversFromSite CLng(ids(i))
+            Err.Clear
+            On Error GoTo Finished
+        End If
+
         leftAlone = False
 
         If Not loaded Then
