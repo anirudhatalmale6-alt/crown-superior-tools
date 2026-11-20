@@ -395,6 +395,25 @@ Public Sub CrownVerveRelationCheck(ByVal drv As Object, ByVal relation As String
 NextWant:
     Next want
 
+    ' 20 Nov (Tony: still R-174 with this installed): the list click did not
+    ' take. Last resort through the box's own DevExpress control - the item
+    ' whose text is the relation, else one starting with "Other" - which is
+    ' what a Save posts back.
+    v = Trim$(CStr(drv.ExecuteScript("var e=document.getElementById(arguments[0]);return e?e.value:'';", inp)))
+    If Len(v) = 0 Or LCase$(v) = "none" Then
+        answer = CStr(drv.ExecuteScript( _
+            "var c=null;try{c=ASPxClientControl.GetControlCollection().Get(arguments[0].replace(/_I$/,''));}catch(e){}" & _
+            "if(!c||!c.GetItemCount)return 'no control';var w=(arguments[1]||'').toLowerCase(),n=c.GetItemCount(),seen=[],pick=-1,oth=-1;" & _
+            "for(var i=0;i<n;i++){var it=c.GetItem(i),t=((it.texts&&it.texts.length?it.texts.join(' '):it.text)||'').trim();seen.push(t);" & _
+            "var parts=(it.texts&&it.texts.length?it.texts:[it.text]).map(function(x){return (x||'').trim().toLowerCase();});" & _
+            "if(pick<0&&w&&parts.indexOf(w)>=0)pick=i;if(oth<0&&parts.some(function(x){return /^other\b/.test(x);}))oth=i;}" & _
+            "if(pick<0)pick=oth;if(pick<0)return 'no '+w+' and no Other ('+seen.join(', ')+')';" & _
+            "c.SetSelectedIndex(pick);try{if(c.RaiseValueChangedEvent)c.RaiseValueChangedEvent();}catch(e){}" & _
+            "return 'set '+seen[pick]+' (list: '+seen.slice(0,12).join(', ')+')';", inp, Trim$(relation)))
+        drv.Wait 900
+        CrownNoteBlocker "Verve driver relation '" & relation & "' still '" & v & "' - through the box itself: " & answer
+    End If
+
     Err.Clear
     On Error GoTo 0
 End Sub
