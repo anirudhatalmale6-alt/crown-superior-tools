@@ -337,7 +337,7 @@ Public Sub CrownVerveDLState(ByVal drv As Object, ByVal state As String)
     On Error Resume Next
     answer = CStr(drv.ExecuteScript( _
         "function vis(e){return !!(e&&e.getClientRects&&e.getClientRects().length);}" & _
-        "var want=arguments[0],full=arguments[1],lab=[].slice.call(document.querySelectorAll('td,span,label,div')).filter(function(e){return vis(e)&&!e.children.length&&/^\*?\s*DL State\s*:?$/i.test((e.innerText||'').trim());})[0];" & _
+        "var want=arguments[0],full=arguments[1],labs=[].slice.call(document.querySelectorAll('td,span,label,div,th')).filter(function(e){return vis(e)&&/^\*?\s*DL\s*State\s*:?$/i.test((e.innerText||'').replace(/\s+/g,' ').trim());}),lab=labs[labs.length-1];" & _
         "if(!lab)return 'no DL State box';" & _
         "var inp=[].slice.call(document.querySelectorAll('input')).filter(function(x){return x.type!=='hidden'&&vis(x)&&(lab.compareDocumentPosition(x)&4);})[0];" & _
         "if(!inp)return 'no DL State input';var v=(inp.value||'').trim().toUpperCase();" & _
