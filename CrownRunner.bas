@@ -705,6 +705,7 @@ Private Function CrownRunVerve(ByVal ws As Worksheet, ByVal row As Long, _
 
     On Error Resume Next
     Err.Clear
+    CrownVerveCover = Empty   ' 22 Nov: never the last customer's coverage
     note = CrownVerveQuote(down, monthly, term)
     If Err.Number <> 0 Then note = "Verve: stopped - " & Err.Description
     Err.Clear
@@ -724,8 +725,8 @@ Private Function CrownRunVerve(ByVal ws As Worksheet, ByVal row As Long, _
 
     If Len(down) > 0 Or Len(monthly) > 0 Then
         answer = CrownQuoteResult(id, _
-            Array("carrier", "state", "down", "monthly", "term", "who", "plan", "due"), _
-            Array("Verve", "quoted", down, monthly, term, "the quoting tool", "autopay", CrownVerveFirstDue))
+            CrownWithCover(Array("carrier", "state", "down", "monthly", "term", "who", "plan", "due"), Empty, True, CrownVerveCover), _
+            CrownWithCover(Empty, Array("Verve", "quoted", down, monthly, term, "the quoting tool", "autopay", CrownVerveFirstDue), False, CrownVerveCover))
 
         If InStr(1, answer, """ok"":true", vbTextCompare) > 0 Then
             CrownRunVerve = True
@@ -735,8 +736,8 @@ Private Function CrownRunVerve(ByVal ws As Worksheet, ByVal row As Long, _
             ' And the direct bill row (5 Pay 16.67% Down - no CC, no EFT).
             If Len(CrownVerveDirectDown) > 0 Or Len(CrownVerveDirectMonthly) > 0 Then
                 If InStr(1, CrownQuoteResult(id, _
-                        Array("carrier", "state", "down", "monthly", "term", "who", "plan", "due"), _
-                        Array("Verve", "quoted", CrownVerveDirectDown, CrownVerveDirectMonthly, term, "the quoting tool", "direct", CrownVerveDirectFirstDue)), _
+                        CrownWithCover(Array("carrier", "state", "down", "monthly", "term", "who", "plan", "due"), Empty, True, CrownVerveCover), _
+                        CrownWithCover(Empty, Array("Verve", "quoted", CrownVerveDirectDown, CrownVerveDirectMonthly, term, "the quoting tool", "direct", CrownVerveDirectFirstDue), False, CrownVerveCover)), _
                         """ok"":true", vbTextCompare) > 0 Then
                     note = note & " / direct bill: down " & CrownVerveDirectDown & ", monthly " & CrownVerveDirectMonthly
                     CrownLogQuoteHistory "Verve (direct bill)", CrownVerveDirectDown, CrownVerveDirectMonthly, term

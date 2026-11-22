@@ -53,6 +53,7 @@ Public CrownVerveDirectFirstDue As String
 ' which is what automatic quoting uses ("tool has to select benchmark
 ' insurance where shown").
 Public CrownVerveCompany As String
+Public CrownVerveCover As Variant   ' 22 Nov: BI, PD, MP, UMB, UMP, um, ded1-4 off the View Quote page (CrownVerveReadCover)
 
 ' The start of the ids on Policy Info / Drivers / Vehicles, read off the page
 ' by CrownVerveIdStart (3 Nov) - FillVerve uses it.
@@ -796,6 +797,40 @@ Private Function CrownVerveFinish(ByVal drv As ChromeDriver, ByRef down As Strin
 End Function
 
 
+' 22 Nov (Tony: "yes please do the same for verve"). The View Quote page
+' lists each vehicle's coverages in a Coverage / Limit / Premium table:
+' Bodily Injury 25/50, Property Damage 25,000.00, UM/UIM BI "25/50 Added On",
+' UM PD, Medical Payments, Comprehensive 500.00, Collision 500.00. Read with
+' textContent, so a folded-up section is still read. Blank when not found.
+Public Sub CrownVerveReadCover(ByVal drv As Object)
+    Dim answer As String
+
+    CrownVerveCover = Empty
+    On Error Resume Next
+    answer = CStr(drv.ExecuteScript( _
+        "function t(x){return (x||'').replace(/\s+/g,' ').trim();}" & _
+        "var o={bi:'',pd:'',mp:'',umb:'',ump:'',um:''},ded=[];" & _
+        "[].slice.call(document.querySelectorAll('table')).forEach(function(tb){if(tb.querySelector('table'))return;" & _
+        "var rows=[].slice.call(tb.rows),hi=-1,lims=[];" & _
+        "for(var r=0;r<rows.length&&hi<0;r++){var cs=[].slice.call(rows[r].cells).map(function(c){return t(c.textContent);});" & _
+        "if(cs.indexOf('Coverage')>=0&&cs.indexOf('Limit')>=0){hi=r;cs.forEach(function(x,i){if(x==='Limit')lims.push(i);});}}" & _
+        "if(hi<0)return;var comp=[],coll=[];" & _
+        "for(var r2=hi+1;r2<rows.length;r2++){var c2=[].slice.call(rows[r2].cells).map(function(c){return t(c.textContent);}),nm=(c2[0]||'').toLowerCase();" & _
+        "lims.forEach(function(li,k){var v=t((c2[li]||'').replace(/\.00\b/g,''));if(!v)return;" & _
+        "if(k===0){if(/^bodily injury/.test(nm)&&!o.bi)o.bi=v;else if(/^property damage/.test(nm)&&!o.pd)o.pd=v;" & _
+        "else if(/^(um\/uim|um|uninsured)[^a-z]*(bi|bodily)/.test(nm)&&!o.umb){var m=v.match(/added|reduced/i);if(m)o.um=m[0].toLowerCase();o.umb=t(v.replace(/added on|added|reduced/ig,''));}" & _
+        "else if(/^(um\/uim|um|uninsured)[^a-z]*(pd|property)/.test(nm)&&!o.ump)o.ump=v;else if(/medical/.test(nm)&&!o.mp)o.mp=v;}" & _
+        "if(/^comprehensive/.test(nm))comp[k]=v;if(/^collision/.test(nm))coll[k]=v;});}" & _
+        "lims.forEach(function(li,k){var a=comp[k]||'',b=coll[k]||'';ded.push(a&&b?a+'/'+b:(a||b));});});" & _
+        "while(ded.length<4)ded.push('');" & _
+        "return [o.bi,o.pd,o.mp,o.umb,o.ump,o.um].concat(ded.slice(0,4)).join('|');"))
+    Err.Clear
+    On Error GoTo 0
+
+    If InStr(answer, "|") > 0 Then CrownVerveCover = Split(answer, "|")
+    CrownNoteBlocker "Verve coverage on the View Quote page: " & answer
+End Sub
+
 ' Read the one pay plan off the table.
 Private Function CrownVerveReadPlan(ByVal drv As ChromeDriver, ByRef down As String, _
                                     ByRef monthly As String, ByRef term As String) As String
@@ -810,6 +845,7 @@ Private Function CrownVerveReadPlan(ByVal drv As ChromeDriver, ByRef down As Str
     CrownVerveDirectFirstDue = ""
 
     rows = CrownVervePlanRows(drv)
+    CrownVerveReadCover drv   ' 22 Nov: the coverages under the plans, for the customer's quote page
 
     ' The two other plans, quietly - they never decide the result either.
     CrownVervePlanFigures rows, VERVE_PLAN_2, CrownVerveAuto2Down, CrownVerveAuto2Monthly, CrownVerveAuto2FirstDue

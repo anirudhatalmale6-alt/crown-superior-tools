@@ -896,11 +896,13 @@ Public Sub CrownUnitedReadCover(ByVal drv As Object)
 End Sub
 
 ' The names and values a price is sent with, plus the coverage when it was read.
-Public Function CrownWithCover(ByVal names As Variant, ByVal values As Variant, ByVal wantNames As Boolean) As Variant
+Public Function CrownWithCover(ByVal names As Variant, ByVal values As Variant, ByVal wantNames As Boolean, _
+                               Optional ByVal cover As Variant) As Variant
     Dim keys As Variant, k As Long, out() As Variant, n As Long, src As Variant
 
+    If IsMissing(cover) Then cover = CrownUnitedCover   ' Verve passes CrownVerveCover
     src = IIf(wantNames, names, values)
-    If Not IsArray(CrownUnitedCover) Then
+    If Not IsArray(cover) Then
         CrownWithCover = src
         Exit Function
     End If
@@ -914,8 +916,8 @@ Public Function CrownWithCover(ByVal names As Variant, ByVal values As Variant, 
     For k = 0 To UBound(keys)
         If wantNames Then
             out(n + k) = keys(k)
-        ElseIf k <= UBound(CrownUnitedCover) Then
-            out(n + k) = CStr(CrownUnitedCover(k))
+        ElseIf k <= UBound(cover) Then
+            out(n + k) = CStr(cover(k))
         Else
             out(n + k) = ""
         End If
