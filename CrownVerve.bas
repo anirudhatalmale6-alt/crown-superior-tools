@@ -846,6 +846,7 @@ Private Function CrownVerveReadPlan(ByVal drv As ChromeDriver, ByRef down As Str
 
     rows = CrownVervePlanRows(drv)
     CrownVerveReadCover drv   ' 22 Nov: the coverages under the plans, for the customer's quote page
+    CrownCoverQuoteNo CrownVerveCover, CrownLabelValue(drv, "Quote Number")   ' and Verve's quote number (QGAH...)
 
     ' The two other plans, quietly - they never decide the result either.
     CrownVervePlanFigures rows, VERVE_PLAN_2, CrownVerveAuto2Down, CrownVerveAuto2Monthly, CrownVerveAuto2FirstDue

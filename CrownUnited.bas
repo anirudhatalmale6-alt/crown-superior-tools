@@ -166,6 +166,10 @@ Public Function CrownUnitedPremium(ByVal drv As Object) As Boolean
     Dim started As Date
     Dim tries As Long
 
+    ' 22 Nov (Tony: "add quote numbers ... and the corresponding quote id from
+    ' crownsuperior"): United's quote number, top of this page.
+    CrownCoverQuoteNo CrownUnitedCover, CrownLabelValue(drv, "Quote Number")
+
     CrownUnitedDown = ""
     CrownUnitedPrevBalance = ""
     CrownUnitedPayToday = ""
@@ -895,6 +899,38 @@ Public Sub CrownUnitedReadCover(ByVal drv As Object)
     CrownNoteBlocker "United coverage on the quote page: " & answer
 End Sub
 
+' The text beside a label on the page ("Quote Number" -> "100339951081"): the
+' next cell along, or the next one with anything in it. Blank when not there.
+Public Function CrownLabelValue(ByVal drv As Object, ByVal label As String) As String
+    On Error Resume Next
+    CrownLabelValue = Trim$(CStr(drv.ExecuteScript( _
+        "function t(x){return (x||'').replace(/\s+/g,' ').trim();}var w=arguments[0].toLowerCase();" & _
+        "var c=[].slice.call(document.querySelectorAll('td,th,span,div,label,dt')).filter(function(e){var x=t(e.textContent).toLowerCase().replace(/:$/,'');return x===w&&!e.querySelector('td,div');});" & _
+        "for(var i=0;i<c.length;i++){var e=c[i].closest('td,th,dt')||c[i],n=e.nextElementSibling;" & _
+        "while(n&&!t(n.textContent))n=n.nextElementSibling;if(n)return t(n.textContent).slice(0,40);}return '';", label)))
+    Err.Clear
+End Function
+
+' The carrier's quote number into the coverage sent with the price (slot 10).
+Public Sub CrownCoverQuoteNo(ByRef cover As Variant, ByVal qno As String)
+    Dim a() As String, k As Long
+
+    qno = Trim$(qno)
+    If Len(qno) = 0 Then Exit Sub
+
+    If IsArray(cover) Then
+        ReDim a(0 To IIf(UBound(cover) < 10, 10, UBound(cover)))
+        For k = 0 To UBound(cover)
+            a(k) = CStr(cover(k))
+        Next k
+    Else
+        ReDim a(0 To 10)
+    End If
+    a(10) = qno
+    cover = a
+    CrownNoteBlocker "Quote number on the page: " & qno
+End Sub
+
 ' The names and values a price is sent with, plus the coverage when it was read.
 Public Function CrownWithCover(ByVal names As Variant, ByVal values As Variant, ByVal wantNames As Boolean, _
                                Optional ByVal cover As Variant) As Variant
@@ -907,7 +943,7 @@ Public Function CrownWithCover(ByVal names As Variant, ByVal values As Variant, 
         Exit Function
     End If
 
-    keys = Array("cov_bi", "cov_pd", "cov_mp", "cov_umb", "cov_ump", "cov_um", "cov_ded1", "cov_ded2", "cov_ded3", "cov_ded4")
+    keys = Array("cov_bi", "cov_pd", "cov_mp", "cov_umb", "cov_ump", "cov_um", "cov_ded1", "cov_ded2", "cov_ded3", "cov_ded4", "cov_qno")
     n = UBound(src) - LBound(src) + 1
     ReDim out(0 To n + UBound(keys))
     For k = 0 To n - 1
