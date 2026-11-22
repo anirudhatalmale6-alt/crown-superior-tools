@@ -49,6 +49,7 @@ Public CrownUnitedPagePlan As String         ' the plan on screen when QuotePay 
 Private Const LS_WAIT_SECONDS As Long = 45
 Private Const PREMIUM_WAIT_SECONDS As Long = 30
 Private Const APPLY_WAIT_SECONDS As Long = 45
+Public CrownUnitedCover As Variant   ' 22 Nov: BI, PD, MP, UMB, UMP, um, ded1-4 read off the quote page (CrownUnitedReadCover)
 
 
 ' ---------------------------------------------------------------------
@@ -866,6 +867,62 @@ Public Sub CrownUnitedDriverCheck(ByVal drv As Object, ByVal n As Long, ByVal wh
         "function v(id){var e=document.getElementById(id);if(!e)return '(none)';return e.tagName==='SELECT'&&e.selectedIndex>=0?e.options[e.selectedIndex].text:e.value;}" & _
         "return 'DOB '+v('tbxDOB" & n & "')+', sex '+v('dbxSEX" & n & "')+', marital '+v('dbxMRS" & n & "')+', type '+v('dbxDRVTYPE" & n & "');")
 End Sub
+
+' 22 Nov (Tony: the customer's quote page should say Liability or Full
+' Coverage and show BI, PD, MP, uninsured motorist and the deductibles). Read
+' off United's quote page just before Continue - the boxes as they will be
+' rated - and sent with the price (cov_bi ... cov_ded4). Blank when a box is
+' not found; the website then leaves that line off.
+Public Sub CrownUnitedReadCover(ByVal drv As Object)
+    Dim answer As String
+
+    CrownUnitedCover = Empty
+    answer = CrownUnitedJs(drv, _
+        "function t(x){return (x||'').replace(/\s+/g,' ').trim();}" & _
+        "function vis(e){return !!(e&&e.getClientRects&&e.getClientRects().length);}" & _
+        "function txt(s){return s&&s.selectedIndex>=0?t(s.options[s.selectedIndex].text):'';}" & _
+        "function sel(lab){var c=[].slice.call(document.querySelectorAll('td,th,label,span,div')).filter(function(e){return vis(e)&&t(e.innerText)===lab&&!e.querySelector('select,td');});" & _
+        "for(var i=0;i<c.length;i++){var cell=c[i].closest('td,th')||c[i],tr=cell.parentNode,idx=[].indexOf.call(tr.children,cell),nx=tr.nextElementSibling;" & _
+        "var s=nx&&nx.children[idx]?nx.children[idx].querySelector('select'):null;" & _
+        "if(!s){s=[].slice.call(document.querySelectorAll('select')).filter(function(x){return vis(x)&&(c[i].compareDocumentPosition(x)&4);})[0];}" & _
+        "if(s)return txt(s);}return '';}" & _
+        "var um='';[].slice.call(document.querySelectorAll('input[type=radio]')).forEach(function(r){if(!r.checked)return;" & _
+        "var l=t((r.labels&&r.labels[0]&&r.labels[0].innerText)||(r.nextSibling&&r.nextSibling.textContent)||'');if(/^(reduced|added)$/i.test(l))um=l.toLowerCase();});" & _
+        "var d=[];for(var n=1;n<=4;n++){var x=document.getElementById('dbxCMPD'+n);var v=vis(x)?txt(x):'';d.push(/^(select|)$/i.test(v)?'':v);}" & _
+        "return [sel('BI'),sel('PD'),sel('MP'),sel('UMB'),sel('UMP'),um].concat(d).join('|');")
+
+    If InStr(answer, "|") > 0 Then CrownUnitedCover = Split(answer, "|")
+    CrownNoteBlocker "United coverage on the quote page: " & answer
+End Sub
+
+' The names and values a price is sent with, plus the coverage when it was read.
+Public Function CrownWithCover(ByVal names As Variant, ByVal values As Variant, ByVal wantNames As Boolean) As Variant
+    Dim keys As Variant, k As Long, out() As Variant, n As Long, src As Variant
+
+    src = IIf(wantNames, names, values)
+    If Not IsArray(CrownUnitedCover) Then
+        CrownWithCover = src
+        Exit Function
+    End If
+
+    keys = Array("cov_bi", "cov_pd", "cov_mp", "cov_umb", "cov_ump", "cov_um", "cov_ded1", "cov_ded2", "cov_ded3", "cov_ded4")
+    n = UBound(src) - LBound(src) + 1
+    ReDim out(0 To n + UBound(keys))
+    For k = 0 To n - 1
+        out(k) = src(LBound(src) + k)
+    Next k
+    For k = 0 To UBound(keys)
+        If wantNames Then
+            out(n + k) = keys(k)
+        ElseIf k <= UBound(CrownUnitedCover) Then
+            out(n + k) = CStr(CrownUnitedCover(k))
+        Else
+            out(n + k) = ""
+        End If
+    Next k
+
+    CrownWithCover = out
+End Function
 
 ' The City on the Input sheet: the cell to the right of the one reading "City".
 Private Function CrownInputCity() As String

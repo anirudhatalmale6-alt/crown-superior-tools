@@ -229,6 +229,7 @@ Public Sub CrownRunQuotes()
             CrownLastAlert = ""
 
             ' Nor one customer's second United price the next one's.
+            CrownUnitedCover = Empty   ' 22 Nov: one customer's coverage never sent with the next one's price
             CrownUnitedDirectDown = ""
             CrownUnitedDirectMonthly = ""
             CrownUnitedDirectFirstDue = ""
@@ -310,8 +311,8 @@ Public Sub CrownRunQuotes()
 
         If Len(down) > 0 Or Len(monthly) > 0 Then
             answer = CrownQuoteResult(CLng(ids(i)), _
-                Array("carrier", "state", "down", "monthly", "term", "who", "plan", "due"), _
-                Array(carrier, "quoted", pDown, pMonthly, term, "the quoting tool", pPlan, pDue))
+                CrownWithCover(Array("carrier", "state", "down", "monthly", "term", "who", "plan", "due"), Empty, True), _
+                CrownWithCover(Empty, Array(carrier, "quoted", pDown, pMonthly, term, "the quoting tool", pPlan, pDue), False))
 
             If InStr(1, answer, """ok"":true", vbTextCompare) > 0 Then
                 did = did + 1
@@ -322,9 +323,9 @@ Public Sub CrownRunQuotes()
                 ' And the direct bill (no auto pay) quote, when United gave one.
                 If extraDirect And (Len(CrownUnitedDirectDown) > 0 Or Len(CrownUnitedDirectMonthly) > 0) Then
                     If InStr(1, CrownQuoteResult(CLng(ids(i)), _
-                            Array("carrier", "state", "down", "monthly", "term", "who", "plan", "due"), _
-                            Array(carrier, "quoted", CrownUnitedDirectDown, CrownUnitedDirectMonthly, term, "the quoting tool", "direct", _
-                                  IIf(Len(CrownUnitedDirectFirstDue) > 0, CrownUnitedDirectFirstDue, uDue))), _
+                            CrownWithCover(Array("carrier", "state", "down", "monthly", "term", "who", "plan", "due"), Empty, True), _
+                            CrownWithCover(Empty, Array(carrier, "quoted", CrownUnitedDirectDown, CrownUnitedDirectMonthly, term, "the quoting tool", "direct", _
+                                  IIf(Len(CrownUnitedDirectFirstDue) > 0, CrownUnitedDirectFirstDue, uDue)), False)), _
                             """ok"":true", vbTextCompare) > 0 Then
                         note = Trim$(note & " / direct bill: down " & CrownUnitedDirectDown & ", monthly " & CrownUnitedDirectMonthly)
                         CrownLogQuoteHistory carrier & " (direct bill)", CrownUnitedDirectDown, CrownUnitedDirectMonthly, term
