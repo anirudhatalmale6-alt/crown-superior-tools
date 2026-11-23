@@ -716,7 +716,9 @@ Private Function CrownRunVerve(ByVal ws As Worksheet, ByVal row As Long, _
     ' United price on the card, Verve was never tried again. No price and
     ' not a "no" from Verve: one more go, in a fresh window, before giving up.
     Dim firstNote As String, stillWhy As String
-    If Len(down) = 0 And Len(monthly) = 0 And Not CrownIsRejection(note) Then
+    ' (Not when the request itself is missing an answer - the same gap stops it again.)
+    If Len(down) = 0 And Len(monthly) = 0 And Not CrownIsRejection(note) _
+       And InStr(1, note, "on the quote request", vbTextCompare) = 0 Then
         If CrownQuoteStillWanted(id, "verve", stillWhy) Then
             firstNote = note
             Application.Wait Now + TimeValue("0:00:10")

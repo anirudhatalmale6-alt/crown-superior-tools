@@ -740,6 +740,59 @@ Public Sub CrownVerveLoginCheck(ByVal drv As ChromeDriver, ByVal wsInput As Work
     ErrorText = ""
 End Sub
 
+' 24 Nov (Tony: driver 2 had no gender - "Tool was closing quote out
+' instead of pointing out error ... and no mention of the true error").
+' What driver n is missing for Verve, said before its page is filled:
+' unattended it is the reason the quote stopped (True = stop); by hand a
+' box says what to pick in the Verve window, then the tool carries on.
+Public Function CrownVerveDriverGaps(ByVal n As Long, ByVal firstName As String, ByVal gender As String, _
+                                     ByVal marital As String, ByVal dob As Variant) As Boolean
+    Dim gaps As String, said As String
+
+    If Len(Trim$(gender)) = 0 Or LCase$(Trim$(gender)) Like "select*" Then gaps = gaps & ", gender"
+    If Len(Trim$(marital)) = 0 Or LCase$(Trim$(marital)) Like "select*" Then gaps = gaps & ", marital status"
+    If Not IsDate(dob) Then gaps = gaps & ", date of birth"
+    If Len(gaps) = 0 Then Exit Function
+
+    said = "Driver " & n & IIf(Len(Trim$(firstName)) > 0, " (" & Trim$(firstName) & ")", "") & _
+           " has no " & Mid$(gaps, 3) & " on the quote request"
+
+    If CrownUnattended Then
+        CrownLastAlert = "Verve: " & said & " - add it on the website and send it back to quote"
+        CrownVerveDriverGaps = True
+        Exit Function
+    End If
+
+    If SmartMsgBox(said & "." & vbCrLf & vbCrLf & "Pick it on the Verve page that is open now (Driver " & n & _
+                   "), then click OK and the tool carries on. Cancel stops here.", vbOKCancel, "Missing on the quote") <> vbOK Then
+        CrownVerveDriverGaps = True
+    End If
+End Function
+
+' A stop that names one of Verve's boxes by its page id ("..._InsName_Sex_D_I
+' not found"), in words.
+Public Function CrownVerveErrorWords(ByVal text As String) As String
+    Dim names As Variant, words As Variant, k As Long, low As String
+
+    CrownVerveErrorWords = text
+    low = LCase$(text)
+    If InStr(low, "not found") = 0 And InStr(low, "error loading") = 0 Then Exit Function
+
+    names = Array("_sex_", "_maritalstatus_", "relationtopolicyholder", "_birthdate_", "_licensenumber_", "ratedexcluded", _
+                  "licensestate", "addressstate", "_city", "personalphone", "vintextbox", "yearcombo", "quotesmenu", "imgpopup")
+    words = Array("Gender", "Marital status", "Relationship to policyholder", "Date of birth", "DL number", "Rated / Excluded", _
+                  "DL State", "State", "City", "Phone", "VIN", "Vehicle year", "Quotes menu (not signed in)", "the page loading")
+
+    For k = 0 To UBound(names)
+        If InStr(low, names(k)) > 0 Then
+            CrownVerveErrorWords = "the " & words(k) & " box could not be filled on Verve's page" & _
+                                   IIf(InStr(low, "_t1_") > 0 And k <= 6, " (a driver page)", "") & _
+                                   " - check that answer on the quote request [" & Right$(text, 60) & "]"
+            Exit Function
+        End If
+    Next k
+End Function
+
 ' From the Coverages page to a price.
 Private Function CrownVerveFinish(ByVal drv As ChromeDriver, ByRef down As String, _
                                   ByRef monthly As String, ByRef term As String) As String
