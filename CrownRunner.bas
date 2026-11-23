@@ -711,6 +711,32 @@ Private Function CrownRunVerve(ByVal ws As Worksheet, ByVal row As Long, _
     Err.Clear
     On Error GoTo 0
 
+    ' 24 Nov (Tony: "it simply froze on the login page and usually when it
+    ' tries again it would work. did it try twice?"): it did not - with a
+    ' United price on the card, Verve was never tried again. No price and
+    ' not a "no" from Verve: one more go, in a fresh window, before giving up.
+    Dim firstNote As String, stillWhy As String
+    If Len(down) = 0 And Len(monthly) = 0 And Not CrownIsRejection(note) Then
+        If CrownQuoteStillWanted(id, "verve", stillWhy) Then
+            firstNote = note
+            Application.Wait Now + TimeValue("0:00:10")
+
+            On Error Resume Next
+            Err.Clear
+            CrownVerveCover = Empty
+            note = CrownVerveQuote(down, monthly, term)
+            If Err.Number <> 0 Then note = "Verve: stopped - " & Err.Description
+            Err.Clear
+            On Error GoTo 0
+
+            If Len(down) > 0 Or Len(monthly) > 0 Then
+                note = "first try failed (" & Left$(firstNote, 120) & "), second try worked: " & note
+            Else
+                note = "tried twice - 1st: " & Left$(firstNote, 120) & " / 2nd: " & note
+            End If
+        End If
+    End If
+
     ' 19 Nov: left to staff while Verve was running - nothing put on the card.
     Dim whyLeft As String
     If Len(down) > 0 Or Len(monthly) > 0 Then
