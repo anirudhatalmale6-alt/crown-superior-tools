@@ -672,6 +672,17 @@ Private Function CrownVervePageErrors(ByVal drv As ChromeDriver) As String
         "return out.slice(0,4).join(' / ');"))
     If Err.Number <> 0 Then CrownVervePageErrors = ""
     On Error GoTo 0
+
+    ' 24 Nov: the logo / page names in red came back as the reason ("Verve
+    ' said: Verve"). Anything that is only Verve's own name says nothing.
+    Dim bits() As String, k As Long, kept As String
+    bits = Split(CrownVervePageErrors, " / ")
+    For k = 0 To UBound(bits)
+        If Len(Trim$(bits(k))) > 3 And LCase$(Trim$(bits(k))) <> "verve" And LCase$(Trim$(bits(k))) <> "verve:" Then
+            kept = kept & IIf(Len(kept) > 0, " / ", "") & Trim$(bits(k))
+        End If
+    Next k
+    If Len(CrownVervePageErrors) > 0 Then CrownVervePageErrors = kept
 End Function
 
 
