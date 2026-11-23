@@ -675,6 +675,71 @@ Private Function CrownVervePageErrors(ByVal drv As ChromeDriver) As String
 End Function
 
 
+' Where Verve's browser was when a quote stopped short, in words (24 Nov).
+Public Function CrownVerveWhere(ByVal drv As ChromeDriver) As String
+    Dim answer As String
+
+    On Error Resume Next
+    answer = CStr(drv.ExecuteScript( _
+        "function t(x){return ((x||'')+'').replace(/\s+/g,' ').trim();}" & _
+        "if(document.getElementById('LoginControl_LoginNameTextBox'))return 'still on the Verve sign-in page (it did not sign in)';" & _
+        "var b=t(document.body?document.body.innerText:'');" & _
+        "if(!b)return 'the Verve page was blank (it never loaded)';" & _
+        "if(!document.getElementById('QuotesMenu')&&/sign ?in|log ?in|password/i.test(b.slice(0,400)))return 'on a Verve sign-in page (it did not sign in)';" & _
+        "var h=document.querySelector('.dxtc-activeTab,.dxtcActiveTab,.dxtc-activeTab span');" & _
+        "var p=location.pathname.split('/').pop()||location.pathname;" & _
+        "return 'on Verve page '+p.slice(0,50)+(h?' ('+t(h.innerText).slice(0,40)+')':'');"))
+    If Err.Number <> 0 Or Len(answer) = 0 Then answer = "Verve's window did not answer (frozen or closed)"
+    On Error GoTo 0
+
+    CrownVerveWhere = answer
+End Function
+
+' "QuotesMenu not found" means the page with the Quotes menu never came:
+' that menu is only there once signed in.
+Private Function CrownVerveAlertWords(ByVal alert As String) As String
+    If InStr(1, alert, "QuotesMenu not found", vbTextCompare) > 0 Then
+        CrownVerveAlertWords = Replace(alert, "QuotesMenu not found", "the Quotes menu never appeared (not signed in)", , , vbTextCompare)
+    Else
+        CrownVerveAlertWords = alert
+    End If
+End Function
+
+' 24 Nov (Tony: "it simply froze on the login page and usually when it
+' tries again it would work"): after Login is pressed, up to 30 seconds for
+' the Quotes menu; if it has not come, Verve's address again and sign in
+' again - twice at most. Never stops FillVerve itself.
+Public Sub CrownVerveLoginCheck(ByVal drv As ChromeDriver, ByVal wsInput As Worksheet)
+    Dim By As New Selenium.By, Keys As New Selenium.Keys
+    Dim started As Date, tries As Long
+
+    On Error Resume Next
+
+    For tries = 1 To 3
+        started = Now
+        Do While (Now - started) * 86400 < 30
+            If drv.IsElementPresent(By.ID("QuotesMenu")) Then Exit Sub
+            drv.Wait 1000
+            DoEvents
+        Loop
+
+        If tries = 3 Then Exit For
+
+        drv.Get wsInput.Range("URL_2").value
+        drv.Wait 3000
+        If drv.IsElementPresent(By.ID("QuotesMenu")) Then Exit Sub
+
+        If drv.IsElementPresent(By.ID("LoginControl_LoginNameTextBox")) Then
+            EnterData drv, Keys, "LoginControl_LoginNameTextBox", wsInput.Range("USER_2").value, "ID"
+            EnterData drv, Keys, "LoginControl_PasswordTextBox", wsInput.Range("PASS_2").value, "ID"
+            ClickElement drv, "LoginControl_LoginLinkButton", "ID"
+        End If
+    Next tries
+
+    Err.Clear
+    ErrorText = ""
+End Sub
+
 ' From the Coverages page to a price.
 Private Function CrownVerveFinish(ByVal drv As ChromeDriver, ByRef down As String, _
                                   ByRef monthly As String, ByRef term As String) As String
@@ -693,12 +758,16 @@ Private Function CrownVerveFinish(ByVal drv As ChromeDriver, ByRef down As Strin
         ' just "Verve:" - the page's own error lines say what it wanted.
         said = CrownVervePageErrors(drv)
 
+        ' 24 Nov (Tony: "none really tell me the issue" - "QuotesMenu not
+        ' found", or just "- Verve"): where the browser was, in words, first.
+        was = CrownVerveWhere(drv)
+
         If Len(said) > 0 Then
-            CrownVerveFinish = "Verve: stopped before Coverages - " & Left$(said, 200)
-        ElseIf Len(Replace(Replace(CrownLastAlert, "Verve", ""), ":", "")) > 3 Then
-            CrownVerveFinish = "Verve: stopped before Coverages - " & Left$(CrownLastAlert, 160)
+            CrownVerveFinish = "Verve: stopped before Coverages - " & was & " - Verve said: " & Left$(said, 160)
+        ElseIf Len(Trim$(Replace(Replace(Replace(CrownLastAlert, "Verve", ""), ":", ""), "-", ""))) > 3 Then
+            CrownVerveFinish = "Verve: stopped before Coverages - " & was & " - " & Left$(CrownVerveAlertWords(CrownLastAlert), 140)
         Else
-            CrownVerveFinish = "Verve: stopped before the Coverages page (Verve gave no reason on screen) - the page is on the QuoteLook sheet"
+            CrownVerveFinish = "Verve: stopped before Coverages - " & was & " (Verve gave no reason on screen; the page is on the QuoteLook sheet)"
         End If
 
         Exit Function
