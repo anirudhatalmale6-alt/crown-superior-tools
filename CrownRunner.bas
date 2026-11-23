@@ -237,6 +237,9 @@ Public Sub CrownRunQuotes()
             CrownUnitedAutoMonthly = ""
             CrownUnitedAutoFirstDue = ""
             CrownUnitedPagePlan = ""
+            CrownUnitedAuto30Down = "": CrownUnitedAuto30Monthly = "": CrownUnitedAuto30FirstDue = ""
+            CrownUnitedDirect30Down = "": CrownUnitedDirect30Monthly = "": CrownUnitedDirect30FirstDue = ""
+            CrownUnited30Heading = ""
 
             ' His own quoting, exactly as he runs it by hand.
             On Error Resume Next
@@ -331,6 +334,20 @@ Public Sub CrownRunQuotes()
                         CrownLogQuoteHistory carrier & " (direct bill)", CrownUnitedDirectDown, CrownUnitedDirectMonthly, term
                     End If
                 End If
+                ' 24 Nov: the 30-day plan (card row "30-day plan", staff only).
+                If Len(CrownUnitedAuto30Monthly) > 0 Then
+                    CrownQuoteResult CLng(ids(i)), Array("carrier", "state", "down", "monthly", "term", "who", "plan", "due", "note"), _
+                        Array(carrier, "quoted", CrownUnitedAuto30Down, CrownUnitedAuto30Monthly, term, "the quoting tool", "autopay2", _
+                              CrownUnitedAuto30FirstDue, CrownUnited30Heading & " (30 days)")
+                    note = Trim$(note & " / auto pay 30 days: down " & CrownUnitedAuto30Down)
+                End If
+                If Len(CrownUnitedDirect30Monthly) > 0 Then
+                    CrownQuoteResult CLng(ids(i)), Array("carrier", "state", "down", "monthly", "term", "who", "plan", "due", "note"), _
+                        Array(carrier, "quoted", CrownUnitedDirect30Down, CrownUnitedDirect30Monthly, term, "the quoting tool", "direct2", _
+                              CrownUnitedDirect30FirstDue, CrownUnited30Heading & " (30 days)")
+                    note = Trim$(note & " / direct bill 30 days: down " & CrownUnitedDirect30Down)
+                End If
+
                 note = Trim$(note & " sent" & IIf(pPlan = "direct", " (direct bill only)", "") & ": down " & pDown & ", monthly " & pMonthly)
             Else
                 failed = failed + 1

@@ -44,6 +44,16 @@ Public CrownUnitedDirectFirstDue As String   ' 29 Oct: First Due Date of the dir
 Public CrownUnitedAutoDown As String
 Public CrownUnitedAutoMonthly As String
 Public CrownUnitedAutoFirstDue As String
+' 24 Nov (Tony: "united 30day plan was never gathered and it is always
+' available"): the 30-day plan's figures, auto pay and direct bill - the
+' card's "30-day plan" row (plans autopay2 / direct2).
+Public CrownUnitedAuto30Down As String
+Public CrownUnitedAuto30Monthly As String
+Public CrownUnitedAuto30FirstDue As String
+Public CrownUnitedDirect30Down As String
+Public CrownUnitedDirect30Monthly As String
+Public CrownUnitedDirect30FirstDue As String
+Public CrownUnited30Heading As String           ' the column read, e.g. "24.20% DOWN PAY"
 Public CrownUnitedPagePlan As String         ' the plan on screen when QuotePay was written: "direct" / "autopay"
 
 Private Const LS_WAIT_SECONDS As Long = 45
@@ -1118,6 +1128,49 @@ Private Function CrownDirectFiguresJs() As String
 End Function
 
 
+' The 30-day plan's figures as "down|first installment|first due date|heading".
+' The 30-day column is the one (not Economy - that one needs auto EFT, and
+' not the 16.67%) whose First Due Date is about 15 days after the 16.67%
+' plan's, which is due at 15 days; 24.20% DOWN PAY is taken when no dates
+' can be read.
+Private Function CrownPlan30FiguresJs() As String
+    CrownPlan30FiguresJs = _
+        "var pr=document.getElementById('rowPlan');if(!pr)return 'no plan table';" & _
+        "function txt(e){return (e&&e.innerText||'').replace(/\s+/g,' ').trim();}" & _
+        "function cellAt(id,c){var r=document.getElementById(id);return r&&r.cells[c]?txt(r.cells[c]):'';}" & _
+        "function day(t){var m=String(t).match(/(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})/);return m?new Date(+m[3],m[1]-1,+m[2]).getTime()/864e5:null;}" & _
+        "var c16=-1,i;for(i=0;i<pr.cells.length;i++){if(/16\.67\s*%/.test(txt(pr.cells[i]))){c16=i;break;}}" & _
+        "var d16=c16>=0?day(cellAt('rowFirstDue',c16)):null,col=-1,best=99;" & _
+        "for(i=1;i<pr.cells.length;i++){var h=txt(pr.cells[i]);if(i===c16||!h||/economy/i.test(h))continue;" & _
+        "var d=day(cellAt('rowFirstDue',i));if(d16===null||d===null)continue;var gap=Math.abs(d-d16-15);if(gap<=7&&gap<best){best=gap;col=i;}}" & _
+        "if(col<0){for(i=0;i<pr.cells.length;i++){if(/24\.20\s*%/.test(txt(pr.cells[i]))){col=i;break;}}}" & _
+        "if(col<0)return 'no 30-day column';" & _
+        "function num(t){var m=String(t).replace(/,/g,'').match(/\$\s*([0-9]+(?:\.[0-9]+)?)/);return m?m[1]:'';}" & _
+        "var down=num(cellAt('rowDown',col));var inst=cellAt('rowInstAmt',col);" & _
+        "var m=inst.replace(/,/g,'').match(/installment\s*1\s*:\s*\$\s*([0-9]+(?:\.[0-9]+)?)/i);" & _
+        "var mon=m?m[1]:num(inst);var due=(cellAt('rowFirstDue',col).match(/\d{1,2}[-\/]\d{1,2}[-\/]\d{4}/)||[''])[0];" & _
+        "return down+'|'+mon+'|'+due+'|'+txt(pr.cells[col]).slice(0,40);"
+End Function
+
+' "down|monthly|due|heading" into the auto pay or direct bill 30-day figures.
+Private Sub CrownUnitedKeep30(ByVal figures As String, ByVal isAuto As Boolean)
+    Dim parts() As String
+
+    If InStr(1, figures, "|") = 0 Or Left$(figures, 1) = "|" Then Exit Sub
+    parts = Split(figures, "|")
+    If UBound(parts) < 3 Then Exit Sub
+    If Len(parts(1)) = 0 Then Exit Sub
+
+    If isAuto Then
+        CrownUnitedAuto30Down = parts(0): CrownUnitedAuto30Monthly = parts(1): CrownUnitedAuto30FirstDue = parts(2)
+    Else
+        CrownUnitedDirect30Down = parts(0): CrownUnitedDirect30Monthly = parts(1): CrownUnitedDirect30FirstDue = parts(2)
+    End If
+
+    CrownUnited30Heading = parts(3)
+End Sub
+
+
 ' ---------------------------------------------------------------------
 ' Both United prices from the final payment page (24 Oct, redone 31 Oct).
 '
@@ -1136,6 +1189,7 @@ Public Sub CrownUnitedDirectBill(ByVal drv As Object)
     Dim tries As Long
     Dim started As Date, recalced As Boolean
     Dim wasAuto As Boolean
+    Dim before30 As String, after30 As String
 
     CrownUnitedDirectDown = ""
     CrownUnitedDirectMonthly = ""
@@ -1144,8 +1198,12 @@ Public Sub CrownUnitedDirectBill(ByVal drv As Object)
     CrownUnitedAutoMonthly = ""
     CrownUnitedAutoFirstDue = ""
     CrownUnitedPagePlan = ""
+    CrownUnitedAuto30Down = "": CrownUnitedAuto30Monthly = "": CrownUnitedAuto30FirstDue = ""
+    CrownUnitedDirect30Down = "": CrownUnitedDirect30Monthly = "": CrownUnitedDirect30FirstDue = ""
+    CrownUnited30Heading = ""
 
     before = CrownUnitedJs(drv, CrownDirectFiguresJs())
+    before30 = CrownUnitedJs(drv, CrownPlan30FiguresJs())
     state = CrownUnitedJs(drv, CrownAutoPayStateJs())
 
     If state = "no box" Then
@@ -1157,6 +1215,10 @@ Public Sub CrownUnitedDirectBill(ByVal drv As Object)
     wasAuto = (state = "box on, card on")
     CrownUnitedPagePlan = IIf(wasAuto, "autopay", "direct")
     CrownNoteBlocker "United payment page opened as " & IIf(wasAuto, "AUTO PAY", "DIRECT BILL") & " (" & state & ")"
+
+    ' The 30-day plan as the page opened (24 Nov).
+    CrownUnitedKeep30 before30, wasAuto
+    CrownNoteBlocker "United 30-day plan (" & IIf(wasAuto, "auto pay", "direct bill") & "): " & before30
 
     If InStr(1, before, "|") > 0 And Left$(before, 1) <> "|" Then
         If wasAuto Then
@@ -1259,6 +1321,22 @@ Public Sub CrownUnitedDirectBill(ByVal drv As Object)
         CrownUnitedAutoMonthly = Split(figures, "|")(1)
         If UBound(Split(figures, "|")) >= 2 Then CrownUnitedAutoFirstDue = Split(figures, "|")(2)
     End If
+
+    ' The 30-day plan after the switch - kept only when it moved too (an
+    ' unchanged one would only be a copy of the other plan's).
+    after30 = CrownUnitedJs(drv, CrownPlan30FiguresJs())
+    If InStr(1, after30, "|") > 0 And InStr(1, before30, "|") > 0 Then
+        If Split(after30, "|")(1) <> Split(before30, "|")(1) Then
+            CrownUnitedKeep30 after30, Not wasAuto
+        Else
+            CrownNoteBlocker "United 30-day plan: the monthly stayed " & Split(after30, "|")(1) & " after switching - not sent twice"
+        End If
+    Else
+        CrownUnitedKeep30 after30, Not wasAuto
+    End If
+    CrownNoteBlocker "United 30-day plan (" & CrownUnited30Heading & "): auto pay down " & CrownUnitedAuto30Down & _
+                     ", installment " & CrownUnitedAuto30Monthly & " / direct bill down " & CrownUnitedDirect30Down & _
+                     ", installment " & CrownUnitedDirect30Monthly
 
     CrownNoteBlocker "United: auto pay down " & CrownUnitedAutoDown & ", installment " & CrownUnitedAutoMonthly & _
                      " / direct bill down " & CrownUnitedDirectDown & ", installment " & CrownUnitedDirectMonthly
