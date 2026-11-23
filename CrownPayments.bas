@@ -30,7 +30,7 @@ Option Explicit
 Private Const UAIG_STALE_DAYS As Long = 60
 
 ' Which copy of this file is in the workbook. Run CrownVersion to see it.
-Public Const CROWN_PAYMENTS_VERSION As String = "6 Oct c - presses OK on Verve's Session Expiring box"
+Public Const CROWN_PAYMENTS_VERSION As String = "23 Nov - Verve: a number not found is tried with GAH / GAF / GAI"
 
 ' The boxes and labels on Verve's own pages, named once so a change on
 ' their side is one line here rather than a hunt through the code.
@@ -2313,6 +2313,45 @@ End Function
 ' that only exists once signed in - the run of 17 Oct stopped 97 policies
 ' early that way, right after the first "Number not found". Now: if the
 ' sign-in form is what comes up, sign in again, then wait for the lookup.
+' The same digits under Verve's other letters ("GAF20005297" typed for
+' "GAH20005297"). The number that opens, or "" - and back to a clean page.
+Private Function CrownVerveOtherPrefix(ByVal drv As ChromeDriver, ByVal By As Selenium.By, _
+                                       ByVal wsInput As Worksheet, ByVal policyNo As String) As String
+    Dim Keys As New Selenium.Keys
+    Dim digits As String, alt As String, ans As String, p As Variant
+
+    digits = CrownDigits(policyNo)
+    If Len(digits) < 6 Or UCase$(Left$(policyNo, 2)) <> "GA" Then Exit Function
+
+    On Error Resume Next
+    For Each p In Array("GAH", "GAF", "GAI")
+        alt = CStr(p) & digits
+
+        If StrComp(alt, policyNo, vbTextCompare) <> 0 Then
+            If Not CrownVerveRecover(drv, By, wsInput) Then Exit Function
+
+            EnterData drv, Keys, VERVE_LOOKUP_BOX, alt, "ID", "", True
+            ClickElement drv, VERVE_LOOKUP_GO, "ID"
+
+            If Not CrownPageShows(drv, alt, 4) Then
+                ans = CrownVerveLookupAnswer(drv, alt)
+                If ans = "clicked" Then
+                    WaitForPopupToDisappear drv, 15000
+                    drv.Wait 800
+                End If
+            End If
+
+            If CrownPageShows(drv, alt) Then
+                CrownVerveOtherPrefix = alt
+                Exit Function
+            End If
+        End If
+    Next p
+
+    CrownVerveRecover drv, By, wsInput
+    Err.Clear
+End Function
+
 Private Function CrownVerveRecover(ByVal drv As ChromeDriver, ByVal By As Selenium.By, _
                                    ByVal wsInput As Worksheet) As Boolean
     Dim Keys As New Selenium.Keys
@@ -2474,6 +2513,7 @@ Public Sub CrownVervePaymentDue()
     Dim futureRows As String
     Dim sessionNote As String
     Dim dismissed As Long
+    Dim wrongNo As String, altNo As String, wrongList As String, wrongCount As Long
     Dim look As Long, looked As Long
     Dim pageWords As String, quiet As Long
     Dim stmtCancel As String
@@ -2630,7 +2670,9 @@ Public Sub CrownVervePaymentDue()
         endedOn = CrownPeriodEnded(parts)
 
         If CrownVerveRests(finished, policyNo, finishedWhy) And Not termOpen _
-           And Not (Len(endedOn) > 0 And CrownActiveWord(CrownSiteStatus(parts))) Then
+           And Not (Len(endedOn) > 0 And CrownActiveWord(CrownSiteStatus(parts))) _
+           And Not (InStr(1, finishedWhy, "no policy with this number", vbTextCompare) > 0 _
+                    And InStr(1, finishedWhy, "GAH, GAF and GAI", vbTextCompare) = 0) Then
             ws.Cells(row, 1).value = recordId
             ws.Cells(row, 2).value = policyNo
             ws.Cells(row, 8).value = "skipped - " & finishedWhy
@@ -2647,6 +2689,7 @@ Public Sub CrownVervePaymentDue()
 
         activity = ""
         verveSays = ""
+        wrongNo = ""
         dueAmount = ""
         dueDate = ""
         cancelDate = ""
@@ -2690,6 +2733,20 @@ Public Sub CrownVervePaymentDue()
             If lookupAnswer = "clicked" Then
                 WaitForPopupToDisappear drv, 15000
                 drv.Wait 800
+            End If
+        End If
+
+        ' 23 Nov (Tony: "GAH20005297 I had it as GAF20005297 ... this is a
+        ' policy that should have been matched and updated or just made me
+        ' aware of it"). Not found: the same digits under Verve's other
+        ' letters (GAH / GAF / GAI) are tried before giving up.
+        If lookupAnswer = "notfound" Or lookupAnswer = "list" Then
+            altNo = CrownVerveOtherPrefix(drv, By, wsInput, policyNo)
+
+            If Len(altNo) > 0 Then
+                wrongNo = policyNo
+                policyNo = altNo
+                lookupAnswer = ""
             End If
         End If
 
@@ -3035,6 +3092,14 @@ VerveWrite:
 
         ws.Cells(row, 1).value = recordId
         ws.Cells(row, 2).value = policyNo
+
+        If Len(wrongNo) > 0 Then
+            ws.Cells(row, 2).value = wrongNo & " -> " & policyNo
+            note = "WRONG POLICY NUMBER on the website: it says " & wrongNo & ", Verve has " & policyNo & _
+                   " (same digits) - read from Verve's " & policyNo & "; please correct the number on the website. " & note
+            wrongCount = wrongCount + 1
+            wrongList = wrongList & vbCrLf & "  record " & recordId & ": website " & wrongNo & " -> Verve " & policyNo
+        End If
         ws.Cells(row, 3).value = dueAmount
         ws.Cells(row, 4).value = dueDate
         ws.Cells(row, 5).value = cancelDate
@@ -3091,7 +3156,9 @@ VerveWrite:
             ' the Future tab - finished, or paid in full. Nothing to chase.
             CrownVerveRemember policyNo, "nothing owed and nothing scheduled at Verve (Next Activity NONE)"
         ElseIf lookupAnswer = "notfound" Or lookupAnswer = "list" Then
-            CrownVerveRemember policyNo, "Verve has no policy with this number"
+            ' Remembered before 23 Nov without the other letters tried, those
+            ' are looked up once more (above); this wording rests for a month.
+            CrownVerveRemember policyNo, "Verve has no policy with this number (GAH, GAF and GAI all tried)"
         End If
 
         row = row + 1
@@ -3118,6 +3185,8 @@ NextVerve:
            IIf(stopped, vbCrLf & "STOPPED EARLY: Verve stopped answering after " & _
                CONSECUTIVE_BEFORE_GIVING_UP & " policies in a row. Nothing was written from " & _
                "that point on. Run it again when the site is behaving." & vbCrLf, "") & vbCrLf & _
+           IIf(wrongCount > 0, vbCrLf & wrongCount & " policy number(s) on the website have the wrong letters - read from Verve " & _
+               "under the right number, please correct them on the website:" & wrongList & vbCrLf, "") & _
            reportNote & vbCrLf & vbCrLf & _
            IIf(dismissed > 0, "Verve's Session Expiring box was dismissed " & dismissed & _
                " times." & vbCrLf, "") & _
