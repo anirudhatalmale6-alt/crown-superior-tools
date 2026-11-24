@@ -155,6 +155,20 @@ function doPost(e) {
       return reply({ ok: false, error: 'no tab called ' + SHEET_NAME });
     }
 
+    // 25 Nov: the website reads this tab LIVE. Google's "Publish to web"
+    // copy it used to read lags up to 5 minutes behind the sheet. Same
+    // text the published CSV gives (what each cell shows), nothing written.
+    if (body.mode === 'rows') {
+      var cells = sheet.getDataRange().getDisplayValues();
+      var csv = cells.map(function (r) {
+        return r.map(function (v) {
+          v = String(v);
+          return /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+        }).join(',');
+      }).join('\r\n');
+      return ContentService.createTextOutput(csv).setMimeType(ContentService.MimeType.CSV);
+    }
+
     var headings = sheet.getRange(1, 1, 1, sheet.getLastColumn())
                         .getValues()[0]
                         .map(function (h) { return String(h).trim().toLowerCase(); });
